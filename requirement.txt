@@ -1,0 +1,9 @@
+langchain-core
+langchain-openai
+openai
+loguru
+tqdm
+python-dotenv
+opencv-python
+pillow
+numpy
