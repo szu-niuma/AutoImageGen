@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from loguru import logger
 
-import llm_object.utils as utils
+import auto_image_edit.utils as utils
 
 from .parser import ImageAnalystPrompt, ImageEditorPrompt, ImageStylistPrompt
 from .processor.image_processor import ImageProcessor

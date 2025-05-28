@@ -1,7 +1,7 @@
 from config import GLOBAL_CONFIG
-from llm_object.image_analysis import ImageAnalysis
-from llm_object.image_creativity import ImageCreativity
-from llm_object.image_editor import ImageEditor
+from auto_image_edit.image_analysis import ImageAnalysis
+from auto_image_edit.image_creativity import ImageCreativity
+from auto_image_edit.image_editor import ImageEditor
 
 if __name__ == "__main__":
     instruction_generator = ImageAnalysis(GLOBAL_CONFIG.get_config(), "output", is_debug=True, max_num=1)

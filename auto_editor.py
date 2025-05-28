@@ -10,7 +10,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from config import GLOBAL_CONFIG
-from llm_object import BallSegments, ImageProcessor
+from auto_image_edit import BallSegments, ImageProcessor
 
 
 class ObjectRecognition:

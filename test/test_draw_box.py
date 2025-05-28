@@ -4,8 +4,8 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from PIL import Image
 
-from llm_object.processor.image_processor import ImageProcessor
-from llm_object.prompts.models.object_model import ObjectModels, ResponseObject
+from auto_image_edit.processor.image_processor import ImageProcessor
+from auto_image_edit.prompts.models.object_model import ObjectModels, ResponseObject
 
 # [{"box_2d": [397, 518, 573, 753], "label": "basket"}, {"box_2d": [296, 668, 398, 831], "label": "ball"}]
 if __name__ == "__main__":
