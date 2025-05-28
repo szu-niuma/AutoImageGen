@@ -32,10 +32,6 @@ def load_json(file_path: Path, raise_exception: bool = True) -> Dict[str, Any]:
                 return handle_error(f"{file_path} 文件为空", ValueError(f"{file_path} 文件为空"))
 
             data = json.loads(content, strict=False)
-            if not isinstance(data, dict):
-                return handle_error(
-                    f"{file_path} 中的 JSON 数据不是字典类型", ValueError(f"{file_path} 中的 JSON 数据不是字典类型")
-                )
             return data
     except (json.JSONDecodeError, IOError, OSError) as e:
         return handle_error(f"处理 {file_path} 时发生错误: {e}", e)

@@ -6,7 +6,7 @@ class MethodModels(BaseModel):
     edited_object: str = Field(..., description="The specific name of the object to be edited (e.g., airplane, book)")
     edit_prompt: str = Field(
         ...,
-        description="A detailed and comprehensive editing prompt that describes the object transformation process with specific implementation details.",
+        description="A detailed and comprehensive editing prompt for llm that describes the object transformation process with specific implementation details.",
     )
 
 

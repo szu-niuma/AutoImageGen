@@ -1,4 +1,6 @@
+datasets/
 dataset/
+
 output/
 config/.env
 
