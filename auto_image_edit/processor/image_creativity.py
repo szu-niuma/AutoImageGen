@@ -1,8 +1,6 @@
-import json
+# -*- coding: utf-8 -*-
 from pathlib import Path
 from typing import Optional
-
-from loguru import logger
 
 from ..models import ResponseMethod
 from ..parser import ImageConsultantPrompt

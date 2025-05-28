@@ -1,12 +1,10 @@
-import json
-import os
+# -*- coding: utf-8 -*-
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
-from loguru import logger
 
 from ..utils.image_processor import ImageProcessor
 

@@ -1,10 +1,6 @@
-import json
-import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# -*- coding: utf-8 -*-
 from pathlib import Path
-from typing import Any, Optional
-
-from loguru import logger
+from typing import Any
 
 from ..parser import ImageAnalystPrompt
 from .base_processor import BaseImageProcessor

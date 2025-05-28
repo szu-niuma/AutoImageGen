@@ -1,20 +1,8 @@
-import json
-import os
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+# -*- coding: utf-8 -*-
 from pathlib import Path
-from typing import Any, Dict
-
-import numpy as np
-from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
-from loguru import logger
-from tqdm import tqdm
+from typing import Any
 
 from ..parser import ForensicAnalysisDescription
-from ..utils.image_processor import ImageProcessor
-
-# 假设这些导入是必要的，已保持项目结构
 from .base_processor import BaseImageProcessor
 
 
