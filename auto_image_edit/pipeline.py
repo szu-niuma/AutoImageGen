@@ -10,7 +10,7 @@ from loguru import logger
 
 import auto_image_edit.utils as utils
 
-from .parser import ImageAnalystPrompt, ImageEditorPrompt, ImageStylistPrompt
+from .parser import ImageAnalystPrompt, ImageConsultantPrompt, ImageEditorPrompt
 from .processor.image_processor import ImageProcessor
 
 
@@ -21,7 +21,7 @@ class Pipeline:
         self.store = {}
 
         self.image_analyst = ImageAnalystPrompt(self.llm, self.store)
-        self.image_stylist = ImageStylistPrompt(self.llm, self.store)
+        self.image_stylist = ImageConsultantPrompt(self.llm, self.store)
         self.image_editor = ImageEditorPrompt(self.llm, self.store)
 
         self.img_dir: Path = Path(img_dir)

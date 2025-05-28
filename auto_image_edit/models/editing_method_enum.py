@@ -77,11 +77,11 @@ def create_editing_method_enum(models: List[Type[BaseModel]]) -> Dict[str, Editi
 # List of all Pydantic models representing different editing methods
 models_list = [
     RepMovingModel,
-    RepRecoloringModel,
     RepResizingModel,
     RepReMovingModel,
     RepGenerationModel,
-    RepContentDragModel,
+    # RepContentDragModel,
+    # RepRecoloringModel,
 ]
 
 # Create the enum

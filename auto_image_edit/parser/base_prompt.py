@@ -90,10 +90,10 @@ class BaseParser(ABC):
     def run(self, inputs: HumanMessage, session_id, max_retries: int = 5, *args, **kwargs) -> BaseModel:
         # 将用户输入注入到 human 占位符
         config = {"configurable": {"session_id": f"{session_id}"}, "request_timeout": 30}
-        messages = inputs if isinstance(inputs, list) else [inputs]
+        human_messages = inputs if isinstance(inputs, list) else [inputs]
 
         for attempt in range(1, max_retries + 1):
-            resp: AIMessage = self.with_message_history.invoke({"messages": messages}, config=config)
+            resp: AIMessage = self.with_message_history.invoke({"messages": human_messages}, config=config)
             resp.content = resp.content.replace("“", '"').replace("”", '"')
             if self.parser is None:
                 return resp.content
@@ -104,7 +104,7 @@ class BaseParser(ABC):
                 json.loads(info)
             except json.JSONDecodeError as e:
                 if attempt < max_retries:
-                    messages = self._add_retry_feedback(e, session_id)
+                    human_messages = self._add_retry_feedback(e, session_id)
                 else:
                     raise RuntimeError(f"经过 {max_retries} 次重试仍无法解析: {e}")
             else:
@@ -117,7 +117,7 @@ class BaseParser(ABC):
                     break
                 except Exception as e:
                     if attempt < max_retries:
-                        messages = self._add_retry_feedback(e, session_id)
+                        human_messages = self._add_retry_feedback(e, session_id)
                     else:
                         raise RuntimeError(f"经过 {max_retries} 次重试仍无法解析: {e}")
         return target

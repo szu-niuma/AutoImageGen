@@ -42,6 +42,6 @@ class Config:
             "base_url": self.base_url,
             "timeout": 300,
             "max_retries": 3,
-            "frequency_penalty": 1,
-            "presence_penalty": 0,
+            "temperature": 0,  # 控制输出的随机性和创造性, 0.0(完全确认)-2.0(高度随机和创造性)
+            "top_p": 0.1,  # 控制词汇选择范围, 0.0(完全确定)-1.0(考虑所有可能的词汇)
         }

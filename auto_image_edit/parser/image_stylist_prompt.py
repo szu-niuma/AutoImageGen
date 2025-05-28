@@ -11,11 +11,11 @@ from ..models.editing_method_enum import EditingMethodEnum
 from .base_prompt import BaseParser
 
 
-class ImageStylistPrompt(BaseParser):
+class ImageConsultantPrompt(BaseParser):
     def __init__(self, llm: BaseLLM, store: Dict[str, Any] = None):
-        prompt_path = "edited_desc.txt"
+        class_name = self.__class__.__name__
         self.combine, self.edited_method_info = self.get_all_editing_methods()
-        super().__init__(llm, prompt_path, ResponseMethod, store=store)
+        super().__init__(llm, class_name, ResponseMethod, store=store)
 
     @staticmethod
     def create_combined_model(model_name, models: List[Type[BaseModel]]) -> Type[BaseModel]:
