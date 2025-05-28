@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from tqdm import tqdm
 
 from .processor import AuthorityAssess, ImageAnalysis, ImageConsultant
 from .utils.image_processor import ImageProcessor
@@ -109,14 +110,38 @@ class CreativityPipeline:
             valid_files = self.read_image(image_path)
 
         if self.is_debug:
-            # 单线程
-            for info in valid_files:
-                self.pipeline(info)
+            # 单线程处理
+            for info in tqdm(valid_files, desc="处理中", disable=len(valid_files) == 1):
+                try:
+                    self.pipeline(info)
+                    logger.debug(f"成功处理文件: {info['image_path']}")
+                except Exception as e:
+                    logger.error(f"处理文件失败 {info['image_path']}: {str(e)}", exc_info=True)
+                    # 可以选择是否继续处理其他文件
+                    continue
         else:
-            # 多线程执行
-            max_workers = min(os.cpu_count() or 16, len(valid_files))
+            # 多线程处理
+            max_workers = min(os.cpu_count() or self.DEFAULT_WORKERS, len(valid_files), self.DEFAULT_WORKERS)
+
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_file = {executor.submit(self.pipeline, f): f for f in valid_files}
-                for future in as_completed(future_to_file):
-                    info = future_to_file[future]
-                    future.result()
+                future_to_file = {executor.submit(self.pipeline, file_info): file_info for file_info in valid_files}
+
+                # 统计处理结果
+                success_count = 0
+                error_count = 0
+
+                with tqdm(total=len(valid_files), desc="处理中", unit="文件") as pbar:
+                    for future in as_completed(future_to_file):
+                        file_info = future_to_file[future]
+                        try:
+                            future.result()
+                            success_count += 1
+                            logger.debug(f"成功处理文件: {file_info['image_path']}")
+                        except Exception as e:
+                            error_count += 1
+                            logger.error(f"处理文件失败 {file_info['image_path']}: {str(e)}", exc_info=True)
+                        finally:
+                            pbar.update(1)
+                            pbar.set_postfix({"成功": success_count, "失败": error_count})
+
+                logger.info(f"处理完成 - 成功: {success_count}, 失败: {error_count}, 总计: {len(valid_files)}")

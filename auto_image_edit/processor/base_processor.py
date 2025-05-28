@@ -56,11 +56,13 @@ class BaseImageProcessor(ABC):
 
     def pre_hook(self, image_path: Path, *args, **kwargs) -> None:
         """预处理钩子方法，可选实现"""
-        logger.info(f"执行任务 [{self.processor_name}]: [{image_path}]")
+        # logger.info(f"执行任务 [{self.processor_name}]: [{image_path}]")
+        pass
 
     def post_hook(self, image_path: Path, result: dict, *args, **kwargs) -> None:
         """后处理钩子方法，可选实现"""
-        logger.info(f"任务执行完毕 [{self.processor_name}]: [{image_path}]")
+        # logger.info(f"任务执行完毕 [{self.processor_name}]: [{image_path}]")
+        pass
 
     def run(self, image_path: Path, image_base64: Optional[str] = None, *args, **kwargs) -> dict:
         """运行处理流程"""
