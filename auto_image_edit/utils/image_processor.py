@@ -1,12 +1,14 @@
 import base64
 from io import BytesIO
 from pathlib import Path
+from typing import Optional, Union
 from urllib.parse import urlparse
 
 import cv2
 import numpy as np
 import requests
 from PIL import Image, ImageDraw, ImageFont
+from skimage.metrics import structural_similarity as ssim
 
 
 class ImageProcessor:
@@ -113,6 +115,32 @@ class ImageProcessor:
         return combined_mask
 
     @staticmethod
+    def load_image_array(img: Union[Image.Image, str, Path, np.ndarray], color_space: str = "RGB") -> np.ndarray:
+        if isinstance(img, np.ndarray):
+            arr = img
+        elif isinstance(img, Image.Image):
+            arr = np.array(img)
+            if arr.ndim == 2:
+                arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+            elif arr.shape[2] == 4:
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
+        elif isinstance(img, (str, Path)):
+            arr = cv2.imread(str(img))
+            if arr is None:
+                raise ValueError(f"无法加载图像: {img}")
+        else:
+            raise ValueError("未知的图像类型。支持 PIL.Image.Image、str、Path、np.ndarray。")
+
+        color_space = color_space.upper()
+        if color_space == "HSV":
+            arr = cv2.cvtColor(arr, cv2.COLOR_BGR2HSV)
+        elif color_space == "RGB":
+            arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+        elif color_space in ["GRAY", "L"]:
+            arr = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+        return arr
+
+    @staticmethod
     def combine_images(src_img, mask_img):
         # mask_img是灰度图像, src_img是RGB图像
         # mask_img中为白色区域的保留src_img内容,黑色区域的去除src_img内容
@@ -127,6 +155,85 @@ class ImageProcessor:
         combined_image = Image.composite(src_img, Image.new("RGBA", src_img.size, (0, 0, 0, 0)), mask_rgba)
 
         return combined_image
+
+    @staticmethod
+    def compare_images_pixelwise(
+        src_img: Union[Image.Image, str, Path, np.ndarray],
+        target_img: Union[Image.Image, str, Path, np.ndarray],
+        ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
+        color_space: str = "HSV",
+    ) -> Image.Image:
+        src_array = ImageProcessor.load_image_array(src_img, color_space)
+        target_array = ImageProcessor.load_image_array(target_img, color_space)
+        if src_array.shape != target_array.shape:
+            raise ValueError("源图像和目标图像的尺寸不匹配。")
+
+        src_array = cv2.GaussianBlur(src_array, (5, 5), 0)
+        target_array = cv2.GaussianBlur(target_array, (5, 5), 0)
+
+        if len(src_array.shape) == 3 and color_space.upper() == "HSV":
+            h1, s1, v1 = cv2.split(src_array)
+            h2, s2, v2 = cv2.split(target_array)
+            # 用 int16 防止负值溢出
+            h_diff = np.minimum(
+                np.abs(h1.astype(np.int16) - h2.astype(np.int16)),
+                180 - np.abs(h1.astype(np.int16) - h2.astype(np.int16)),
+            ).astype(np.uint8)
+            s_diff = cv2.absdiff(s1, s2)
+            v_diff = cv2.absdiff(v1, v2)
+            diff_gray = (h_diff * 0.4 + s_diff * 0.3 + v_diff * 0.3).astype(np.uint8)
+        elif color_space.upper() == "RGB" and len(src_array.shape) == 3:
+            diff_r = cv2.absdiff(src_array[:, :, 0], target_array[:, :, 0])
+            diff_g = cv2.absdiff(src_array[:, :, 1], target_array[:, :, 1])
+            diff_b = cv2.absdiff(src_array[:, :, 2], target_array[:, :, 2])
+            diff_gray = (diff_r * 0.30 + diff_g * 0.59 + diff_b * 0.11).astype(np.uint8)
+        elif color_space.upper() == "GRAY":
+            diff_gray = cv2.absdiff(src_array, target_array)
+        else:
+            raise ValueError(f"不支持的颜色空间差异计算: {color_space}")
+
+        _, mask = cv2.threshold(diff_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        min_dimension = min(src_array.shape[:2])
+        kernel_size = max(3, min(31, int(min_dimension / 100)))
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        if ref_mask is not None:
+            ref_mask_array = ImageDiff.load_image_array(ref_mask, "GRAY")
+            _, ref_mask_binary = cv2.threshold(ref_mask_array, 127, 255, cv2.THRESH_BINARY)
+            mask = cv2.bitwise_or(mask, ref_mask_binary.astype(np.uint8))
+
+        return Image.fromarray(mask.astype(np.uint8))
+
+    @staticmethod
+    def compare_images_ssim(
+        src_img: Union[Image.Image, str, Path, np.ndarray],
+        target_img: Union[Image.Image, str, Path, np.ndarray],
+        ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
+    ) -> Image.Image:
+        src_array = ImageProcessor.load_image_array(src_img)
+        target_array = ImageProcessor.load_image_array(target_img)
+        if src_array.shape != target_array.shape:
+            raise ValueError("源图像和目标图像的尺寸不一致。")
+        src_gray = cv2.cvtColor(src_array, cv2.COLOR_RGB2GRAY)
+        target_gray = cv2.cvtColor(target_array, cv2.COLOR_RGB2GRAY)
+        _, diff = ssim(src_gray, target_gray, full=True)
+        diff = (diff * 255).astype(np.uint8)
+        diff = cv2.absdiff(255, diff)
+        _, mask = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        min_dim = min(src_gray.shape[:2])
+        kernel_size = max(3, min(int(min_dim / 50), 21))
+        if kernel_size % 2 == 0:
+            kernel_size += 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        if ref_mask is not None:
+            ref_mask_array = ImageDiff.load_image_array(ref_mask, "GRAY")
+            _, ref_mask_binary = cv2.threshold(ref_mask_array, 127, 255, cv2.THRESH_BINARY)
+            mask = cv2.bitwise_or(mask, ref_mask_binary)
+        return Image.fromarray(mask)
 
     @staticmethod
     def get_dataset(dataset_dir: Path):
