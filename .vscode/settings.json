@@ -2,6 +2,7 @@
 "isGitignoreExtActive": true,
 "cSpell.words": [
     "bbox",
+    "imwrite",
     "llms"
 ],
 }

@@ -14,8 +14,7 @@ def main():
     )
 
     target_json = r"E:\桌面\李老师科研小组\AutoImageGen\datasets\sampled_labels.json"
-    result = creativity_pipeline.run(target_json)  # 替换为实际的图片路径或目录
-    print(result)
+    creativity_pipeline.run(target_json)  # 替换为实际的图片路径或目录
 
 
 if __name__ == "__main__":
