@@ -29,3 +29,7 @@ OPENAI_MODEL_NAME=your_model_name`
 system prompt: `./llm_object/prompts/object_detection.txt`
 
 user prompt: `Detect the 2d bounding boxes of the basket and the ball (with “label” as topping description”)`
+
+# TODO
+1. 将图像输入可控图像编辑软件实现对应的结果
+2. 将图像输入大模型中生成对应的编辑结果
