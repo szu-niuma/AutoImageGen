@@ -201,7 +201,7 @@ class ImageProcessor:
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
         if ref_mask is not None:
-            ref_mask_array = ImageDiff.load_image_array(ref_mask, "GRAY")
+            ref_mask_array = ImageProcessor.load_image_array(ref_mask, "GRAY")
             _, ref_mask_binary = cv2.threshold(ref_mask_array, 127, 255, cv2.THRESH_BINARY)
             mask = cv2.bitwise_or(mask, ref_mask_binary.astype(np.uint8))
 

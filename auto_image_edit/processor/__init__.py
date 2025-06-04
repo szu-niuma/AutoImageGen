@@ -1,3 +1,4 @@
 from .authority_assess import AuthorityAssess
 from .image_analysis import ImageAnalysis
-from .image_creativity import ImageConsultant
+from .image_comparison import ImageComparison
+from .image_consultant import ImageConsultant

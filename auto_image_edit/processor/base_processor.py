@@ -18,10 +18,7 @@ class BaseImageProcessor(ABC):
         self.processor_name = processor_name
 
     def load_human_msg(
-        self,
-        image_path: Path,
-        text_content: str = None,
-        image_base64: Optional[str] = None,
+        self, image_path: Path, text_content: str = None, image_base64: Optional[str] = None, *args, **kwargs
     ) -> HumanMessage:
         """加载图像数据并构建消息"""
         if image_base64 is None:
@@ -65,6 +62,6 @@ class BaseImageProcessor(ABC):
     def run(self, image_path: Path, image_base64: Optional[str] = None, *args, **kwargs) -> dict:
         """运行处理流程"""
         self.pre_hook(image_path, image_base64)
-        result = self.process_file(image_path, image_base64=image_base64, *args, **kwargs)
+        result = self.process_file(image_path, image_base64, *args, **kwargs)
         self.post_hook(image_path, result)
         return result
