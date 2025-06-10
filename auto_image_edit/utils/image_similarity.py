@@ -22,7 +22,8 @@ class ImageSimilarity:
         elif isinstance(img, Image.Image):
             arr = np.array(img)
         # 支持 网络 URL / Base64 / 本地路径
-        elif isinstance(img, str):
+        elif isinstance(img, str) or isinstance(img, Path):
+            img = str(img)  # 确保是字符串类型
             parsed = urlparse(img)
             # 网络 URL
             if parsed.scheme in ("http", "https"):
@@ -92,6 +93,7 @@ class ImageSimilarity:
         color_space: str = "RGB",
         norm: str = "zscore",
         heatmap: bool = False,
+        gray: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         src_array = ImageSimilarity.load_image_array(src_img, color_space)
         target_array = ImageSimilarity.load_image_array(target_img, color_space)
@@ -125,6 +127,8 @@ class ImageSimilarity:
         diff_gray = ImageSimilarity.apply_ref_mask(diff_gray, ref_mask)
         if heatmap:
             return ImageSimilarity.to_heatmap(diff_gray)
+        elif gray:
+            return ImageSimilarity.to_grey(diff_gray)
         return diff_gray
 
     @staticmethod
@@ -160,6 +164,7 @@ class ImageSimilarity:
         ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
         norm="zscore",
         heatmap: bool = False,
+        gray: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         """
         使用 LPIPS (Learned Perceptual Image Patch Similarity) 库比较两张图像的相似度。
@@ -188,6 +193,8 @@ class ImageSimilarity:
         diff_gray = ImageSimilarity.apply_ref_mask(diff_gray, ref_mask)
         if heatmap:
             return ImageSimilarity.to_heatmap(diff_gray)
+        elif gray:
+            return ImageSimilarity.to_grey(diff_gray)
         return diff_gray
 
     @staticmethod
@@ -260,7 +267,6 @@ class ImageSimilarity:
             diff[mb.astype(bool)] = diff.max()
         return diff
 
-    # 新增：将归一化差异图转为 PIL 热图
     @staticmethod
     def to_heatmap(diff: np.ndarray) -> Image.Image:
         # 断言 diff 是归一化到 [0, 1] 的数组
@@ -269,3 +275,13 @@ class ImageSimilarity:
         c_map = (diff * 255).astype(np.uint8)
         heat = cv2.applyColorMap(c_map, cv2.COLORMAP_JET)
         return Image.fromarray(cv2.cvtColor(heat, cv2.COLOR_BGR2RGB))
+
+    @staticmethod
+    def to_grey(diff: np.ndarray) -> Image.Image:
+        # 断言 diff 是归一化到 [0, 1] 的数组
+        if not (0 <= diff.min() <= 1 and 0 <= diff.max() <= 1):
+            raise ValueError("差异图必须是归一化到 [0, 1] 的数组。")
+        # 差异越大越接近白色, 差异越小越接近黑色
+        # 直接把归一化后的值映射到 [0,255]，并生成 L 模式灰度图
+        c_map = (diff * 255).round().astype(np.uint8)
+        return Image.fromarray(c_map, mode="L")

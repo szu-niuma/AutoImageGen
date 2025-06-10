@@ -8,7 +8,7 @@ from PIL import Image
 from tqdm import tqdm  # 新增
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from auto_image_edit.utils.image_processor import ImageProcessor
+from auto_image_edit.utils.image_similarity import ImageSimilarity
 
 SAVE_TARGET_DIR = Path("/home/yuyangxin/data/dataset/custom_dataset/llm_edit")
 
@@ -24,7 +24,7 @@ def save_json_file(file_path: Path, data):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
-def process_json_file(img_processor: ImageProcessor):
+def process_json_file():
     au_dir: Path = SAVE_TARGET_DIR / "Au"
     tp_dir = SAVE_TARGET_DIR / "Tp"
     gt_dir = SAVE_TARGET_DIR / "Gt"
@@ -39,27 +39,30 @@ def process_json_file(img_processor: ImageProcessor):
         # 获取对应的tp_dir路径
         index = au_file.stem.split("_")[-1]
         tp_file = tp_dir / f"fake_{index}.jpg"
-        real_image = img_processor.load_image(au_file)[0]
-        fake_image = img_processor.load_image(tp_file)[0]
-        if fake_image.size != real_image.size:
-            raise ValueError(f"Image size mismatch: {fake_image.size} != {real_image.size}")
+        assert tp_file.is_file(), f"对应的tp文件不存在: {tp_file}"
+        pixel_mask = ImageSimilarity.compare_images_pixelwise(au_file, tp_file, gray=True)
+        pixel_mask_path = gt_dir / f"pixel_gt_{index}.jpg"
+        pixel_mask.save(pixel_mask_path)
 
-        diff_mask = img_processor.compare_images_pixelwise(real_image, fake_image, None, "HSV")
-        diff_mask_path = gt_dir / f"gt_{index}.jpg"
-        diff_mask.save(diff_mask_path)
+        lpips_mask = ImageSimilarity.compare_images_lpips(au_file, tp_file, gray=True)
+        lpips_mask_path = gt_dir / f"lpips_gt_{index}.jpg"
+        lpips_mask.save(lpips_mask_path)
+
         json_data.append(
             {
                 "real_image": au_file.absolute().as_posix(),
                 "fake_image": tp_file.absolute().as_posix(),
-                "gt_mask": diff_mask_path.absolute().as_posix(),
+                "pixel_gt_mask": pixel_mask_path.absolute().as_posix(),
+                "lpips_gt_mask": lpips_mask_path.absolute().as_posix(),
             }
         )
+
+        print(f"Processed {au_file.name} and saved masks to {pixel_mask_path.name} and {lpips_mask_path.name}")
     save_json_file(SAVE_TARGET_DIR / "inst.json", json_data)
 
 
 def main():
-    img_processor = ImageProcessor()
-    process_json_file(img_processor)
+    process_json_file()
 
 
 if __name__ == "__main__":
