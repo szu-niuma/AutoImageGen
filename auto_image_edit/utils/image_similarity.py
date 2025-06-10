@@ -67,7 +67,7 @@ class ImageSimilarity:
         tgt: Union[Image.Image, str, Path, np.ndarray],
         ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
         color_space: str = "RGB",
-        norm: str = None,
+        norm: str = "zscore",
         heatmap: bool = False,
     ) -> Union[np.ndarray, Image.Image]:
         """基于逐像素 MSE 的差异图计算。"""
@@ -90,7 +90,7 @@ class ImageSimilarity:
         target_img: Union[Image.Image, str, Path, np.ndarray],
         ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
         color_space: str = "RGB",
-        norm: str = None,
+        norm: str = "zscore",
         heatmap: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         src_array = ImageSimilarity.load_image_array(src_img, color_space)
@@ -132,7 +132,7 @@ class ImageSimilarity:
         src_img: Union[Image.Image, str, Path, np.ndarray],
         target_img: Union[Image.Image, str, Path, np.ndarray],
         ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
-        norm: str = "sigmoid",
+        norm: str = "zscore",
         heatmap: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         src_array = ImageSimilarity.load_image_array(src_img)
@@ -158,7 +158,7 @@ class ImageSimilarity:
         img_real: Union[Image.Image, str, Path, np.ndarray],
         img_fake: Union[Image.Image, str, Path, np.ndarray],
         ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
-        norm="sigmoid",
+        norm="zscore",
         heatmap: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         """
@@ -194,7 +194,6 @@ class ImageSimilarity:
     def diff_weight(
         src_np: Union[Image.Image, str, Path, np.ndarray],
         target_np: Union[Image.Image, str, Path, np.ndarray],
-        norm="sigmoid",
         heatmap: bool = False,
     ) -> Union[np.ndarray, Image.Image]:
         """
