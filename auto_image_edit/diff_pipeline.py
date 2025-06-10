@@ -152,7 +152,8 @@ class DiffPipeline:
                 logger.info(f"处理完成 - 成功: {success_count}, 失败: {error_count}, 总计: {len(valid_files)}")
 
         # 如果是单个的json文件, 则覆盖保存内容
-        output_path = self.output_dir / image_path.name
+        image_path = Path(image_path)
+        output_path = self.output_dir / f"{image_path.parent.name}.json"
         if image_path.suffix.lower() == ".json":
             # valid_files按照key值进行排序
             save_json(output_path, valid_files)

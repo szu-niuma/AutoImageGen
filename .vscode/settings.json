@@ -4,8 +4,18 @@
     "absdiff",
     "bbox",
     "brushedit",
+    "errstate",
+    "getdata",
+    "imread",
     "imwrite",
     "llms",
-    "pixelwise"
+    "lpips",
+    "minmax",
+    "pixelwise",
+    "prec",
+    "PSNR",
+    "putdata",
+    "skimage",
+    "ssim"
 ],
 }

@@ -4,13 +4,13 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from loguru import logger
 from tqdm import tqdm
 
-from config import GLOBAL_CONFIG
 from auto_image_edit import BallSegments, ImageProcessor
+from config import GLOBAL_CONFIG
 
 
 class ObjectRecognition:
