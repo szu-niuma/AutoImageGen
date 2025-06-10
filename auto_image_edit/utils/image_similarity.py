@@ -10,9 +10,12 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 from skimage.metrics import structural_similarity as ssim
 import torch
+import lpips
 
 
 class ImageSimilarity:
+    LPIPS_MODEL = lpips.LPIPS(net="vgg", spatial=True)
+
     @staticmethod
     def load_image_array(img: Union[Image.Image, str, Path, np.ndarray], color_space: str = "RGB") -> np.ndarray:
         # 支持 numpy array
@@ -171,22 +174,16 @@ class ImageSimilarity:
         LPIPS 通过​​深度特征空间的距离计算​​模拟人类视觉系统，使评估结果更贴近主观感知
         CODE: https://github.com/richzhang/PerceptualSimilarity
         """
-        try:
-            import lpips
-        except ImportError:
-            raise ImportError("请安装 lpips 库以使用 LPIPS 比较功能。")
-
         src_array = ImageSimilarity.load_image_array(img_real)
         target_array = ImageSimilarity.load_image_array(img_fake)
         if src_array.shape != target_array.shape:
             raise ValueError("源图像和目标图像的尺寸不一致。")
 
-        lpips_model = lpips.LPIPS(net="vgg", spatial=True)
         src_tensor = lpips.im2tensor(src_array)
         target_tensor = lpips.im2tensor(target_array)
 
         with torch.no_grad():
-            score_map_tensor = lpips_model.forward(src_tensor, target_tensor)
+            score_map_tensor = ImageSimilarity.LPIPS_MODEL.forward(src_tensor, target_tensor)
 
         # 归一化
         diff_gray = ImageSimilarity.norm_method(score_map_tensor, norm)
