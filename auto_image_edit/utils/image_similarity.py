@@ -161,6 +161,23 @@ class ImageSimilarity:
         return diff_gray
 
     @staticmethod
+    def check_and_resize(
+        src_img: Union[Image.Image, str, Path, np.ndarray],
+        target_img: Union[Image.Image, str, Path, np.ndarray],
+    ) -> Image.Image:
+        """
+        检查 src_img 和 target_img 的尺寸是否一致。
+        如果不一致，则将 target_img 调整到与 src_img 相同的尺寸并返回调整后的数组；
+        否则返回 None。
+        """
+        src_array = ImageSimilarity.load_image_array(src_img)
+        tgt_array = ImageSimilarity.load_image_array(target_img)
+        if src_array.shape != tgt_array.shape:
+            h, w = src_array.shape[:2]
+            tgt_array = cv2.resize(tgt_array, (w, h), interpolation=cv2.INTER_AREA)
+        return Image.fromarray(tgt_array.astype(np.uint8), mode="RGB")
+
+    @staticmethod
     def compare_images_lpips(
         img_real: Union[Image.Image, str, Path, np.ndarray],
         img_fake: Union[Image.Image, str, Path, np.ndarray],

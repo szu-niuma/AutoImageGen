@@ -5,6 +5,7 @@
     "bbox",
     "brushedit",
     "errstate",
+    "fragfake",
     "getdata",
     "imread",
     "imwrite",
