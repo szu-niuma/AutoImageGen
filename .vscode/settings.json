@@ -9,6 +9,7 @@
     "getdata",
     "imread",
     "imwrite",
+    "LANCZOS",
     "llms",
     "lpips",
     "minmax",
@@ -16,6 +17,7 @@
     "prec",
     "PSNR",
     "putdata",
+    "qwen",
     "skimage",
     "ssim"
 ],

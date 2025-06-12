@@ -137,7 +137,7 @@ class DiffPipeline:
                 future_to_file = {executor.submit(self.pipeline, file_info): file_info for file_info in valid_files}
                 # 统计处理结果
                 success_count, error_count = 0, 0
-                with tqdm(total=len(valid_files), desc="处理中", unit="文件") as pbar:
+                with tqdm(total=len(valid_files), desc="处理中", unit="文件") as p_bar:
                     for future in as_completed(future_to_file):
                         future_to_file[future]
                         try:
@@ -147,8 +147,8 @@ class DiffPipeline:
                             error_count += 1
                             logger.error(f"处理失败 {info}: {str(e)}", exc_info=True)
                         finally:
-                            pbar.update(1)
-                            pbar.set_postfix({"成功": success_count, "失败": error_count})
+                            p_bar.update(1)
+                            p_bar.set_postfix({"成功": success_count, "失败": error_count})
                 logger.info(f"处理完成 - 成功: {success_count}, 失败: {error_count}, 总计: {len(valid_files)}")
 
         # 如果是单个的json文件, 则覆盖保存内容

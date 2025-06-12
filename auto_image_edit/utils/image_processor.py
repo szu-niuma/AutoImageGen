@@ -12,7 +12,7 @@ from skimage.metrics import structural_similarity as ssim
 
 
 class ImageProcessor:
-    def __init__(self, max_width=None, max_height=None, font_size=40):
+    def __init__(self, max_width=None, max_height=None, font_size=40, maintain_aspect_ratio=True):
         """
         初始化ImageProcessor类。
         """
@@ -20,6 +20,8 @@ class ImageProcessor:
         self.max_height = max_height
         self.font_path = "./resource/front/MSYH.TTC"
         self.font_size = font_size  # 可根据需求调节大小
+        # 新增变量：是否等比缩放
+        self.maintain_aspect_ratio = maintain_aspect_ratio
 
     def resize_image(self, image):
         # 获取原始图像的宽度和高度
@@ -28,7 +30,17 @@ class ImageProcessor:
         if self.max_width is None and self.max_height is None:
             return image, 1
 
-        # 如果原始图像本身已经符合最大宽高要求，无需缩放
+        # 非等比缩放
+        if not self.maintain_aspect_ratio:
+            new_width = self.max_width or original_width
+            new_height = self.max_height or original_height
+            width_ratio = new_width / original_width
+            height_ratio = new_height / original_height
+            resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            # 返回宽、高缩放比例
+            return resized_image, (width_ratio, height_ratio)
+
+        # 等比缩放：如果原始图像已经符合要求，无需缩放
         if original_width <= self.max_width and original_height <= self.max_height:
             return image, 1
 
@@ -62,8 +74,10 @@ class ImageProcessor:
             image = self.load_image(image)[1]
         elif isinstance(image, np.ndarray):
             image = Image.fromarray(image)
+
+        trans_image, _ = self.resize_image(image)
         with BytesIO() as buffered:
-            image.save(buffered, format=format_info)
+            trans_image.save(buffered, format=format_info)
             trans_image_webp = base64.b64encode(buffered.getvalue()).decode()
         return trans_image_webp
 

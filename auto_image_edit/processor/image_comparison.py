@@ -60,7 +60,7 @@ class ImageComparison(BaseImageProcessor):
             },
         ]
         if text_content:
-            content.extend(
+            content.append(
                 {
                     "type": "text",
                     "text": text_content,

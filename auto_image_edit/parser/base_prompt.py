@@ -57,7 +57,7 @@ class BaseParser(ABC):
 
         self.system_msg = system_msg
         self.parser = PydanticOutputParser(pydantic_object=pydantic_object) if pydantic_object else None
-        self.template = self.load_template(self.parser)
+        self.template = self.system_template(self.parser)
         self.chain = self.template | self.llm
         self.with_message_history = RunnableWithMessageHistory(self.chain, self.get_session_history)
 
@@ -66,16 +66,14 @@ class BaseParser(ABC):
             self.store[session_id] = InMemoryChatMessageHistory()
         return self.store[session_id]
 
-    def load_template(self, output_parser: PydanticOutputParser = None):
+    def system_template(self, output_parser: PydanticOutputParser = None):
         placeholders = [
             ("system", self.system_msg),
             ("system", "{format_instructions}"),
             MessagesPlaceholder(variable_name="messages"),
         ]
         # return ChatPromptTemplate(placeholders)
-        partial_vars = {
-            "format_instructions": output_parser.get_format_instructions() if output_parser is not None else None
-        }
+        partial_vars = {"format_instructions": output_parser.get_format_instructions() if output_parser is not None else None}
         return ChatPromptTemplate(placeholders, partial_variables=partial_vars)
 
     def _add_retry_feedback(self, e: Exception, session_id):
@@ -207,9 +205,7 @@ class BaseParser(ABC):
         if not (0 <= index < len(msgs)):
             raise IndexError(f"消息索引 {index} 超出范围")
         orig = msgs[index]
-        msgs[index] = (
-            HumanMessage(content=new_content) if isinstance(orig, HumanMessage) else AIMessage(content=new_content)
-        )
+        msgs[index] = HumanMessage(content=new_content) if isinstance(orig, HumanMessage) else AIMessage(content=new_content)
 
         # 3. 重新调用 LLM（带历史）
         config = {"configurable": {"session_id": session_id}}
