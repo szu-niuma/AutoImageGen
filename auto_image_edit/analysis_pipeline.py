@@ -1,3 +1,4 @@
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -68,7 +69,7 @@ class AnalysisPipeline:
             text_content=edited_msg,
         )
 
-    def get_valid_files(self, info_path: Path) -> List[Dict[str, Any]]:
+    def get_valid_files(self, info_path: Path, output_path: Path) -> List[Dict[str, Any]]:
         """
         支持目录或 JSON 文件：
           - 目录：遍历所有文件
@@ -78,12 +79,10 @@ class AnalysisPipeline:
         if not info_path.exists():
             raise FileNotFoundError(f"Path not found: {info_path}")
 
-        if info_path.suffix.lower() == ".json":
-            data = load_json(info_path)
-        elif info_path.is_dir():
-            data = [{"real_image": None, "fake_image": p} for p in info_path.iterdir() if p.is_file()]
-        else:
-            raise ValueError("只支持目录或 JSON 文件")
+        data = load_json(info_path)
+        if output_path.exists():
+            logger.info(f"输出文件已存在，加载已处理记录: {output_path}")
+            output_data = load_json(output_path)
 
         pending = []
         for item in data:
@@ -96,9 +95,13 @@ class AnalysisPipeline:
             pending = pending[: self.max_num]
         return pending
 
-    def _execute(self, valid_files: List[Dict[str, Any]]) -> None:
+    def _execute(
+        self,
+        valid_files: List[Dict[str, Any]],
+        jsonl_path: Path = None,  # 新增参数
+    ) -> None:
         """
-        核心执行逻辑，单/多线程通用
+        核心执行逻辑，单/多线程通用，支持逐条写入 jsonl
         """
         workers = (
             1
@@ -110,6 +113,8 @@ class AnalysisPipeline:
             )
         )
         success = err = 0
+        # 如果需要输出到 jsonl，提前打开文件
+        f_jsonl = jsonl_path.open("w", encoding="utf-8") if jsonl_path else None
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {executor.submit(self.pipeline, f): f for f in valid_files}
             with tqdm(total=len(valid_files), desc="处理中", unit="文件") as p_bar:
@@ -118,11 +123,16 @@ class AnalysisPipeline:
                     try:
                         info["forensic_analysis"] = future.result()
                         success += 1
+                        # 逐条写入 jsonl
+                        if f_jsonl:
+                            f_jsonl.write(json.dumps(info, ensure_ascii=False) + "\n")
                     except Exception as e:
                         err += 1
                         logger.error(f"处理失败: {e}", exc_info=True)
                     p_bar.update(1)
                     p_bar.set_postfix({"成功": success, "失败": err})
+        if f_jsonl:
+            f_jsonl.close()
         logger.info(f"完成: 成功 {success} 失败 {err} 总计 {len(valid_files)}")
 
     def run(self, info_path: Path) -> Dict[str, Dict[str, Any]]:
@@ -131,20 +141,23 @@ class AnalysisPipeline:
         返回 {文件路径: forensic_analysis} 映射，并在 JSON 情况下保存结果。
         """
         info_path = Path(info_path)
-        valid_files = self.get_valid_files(info_path)
+        output_path = self.output_dir / f"{info_path.stem}.json"
+        valid_files = self.get_valid_files(info_path, output_path)
         if not valid_files:
-            logger.info("未发现待处理文件")
-            return {}
+            raise ValueError(f"没有待处理文件: {info_path}")
         else:
             logger.info(f"待处理文件数量: {len(valid_files)}")
 
         # 执行分析
-        self._execute(valid_files)
+        # 如果输入是 JSON，则准备 jsonl 输出路径
+        jsonl_output = None
+        if info_path.suffix.lower() == ".json":
+            jsonl_output = self.output_dir / f"{info_path.stem}.jsonl"
+        self._execute(valid_files, jsonl_output)
 
         # 若输入为 JSON，保存覆盖
         if info_path.suffix.lower() == ".json":
-            out_file = self.output_dir / f"{info_path.stem}.json"
-            save_json(out_file, valid_files)
+            save_json(output_path, valid_files)
 
         # 返回映射
         return {str(item.get("fake_image", item.get("image_path"))): item["forensic_analysis"] for item in valid_files}
