@@ -18,7 +18,7 @@ class AnalysisPipeline:
     分析流程：加载图片、计算差异掩码、调用 ForensicReasoning，支持单/多线程与 JSON 批量处理。
     """
 
-    DEFAULT_WORKERS = 16
+    DEFAULT_WORKERS = 32
 
     def __init__(
         self,

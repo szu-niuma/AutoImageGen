@@ -17,13 +17,19 @@ class ImageSimilarity:
     LPIPS_MODEL = lpips.LPIPS(net="vgg", spatial=True)
 
     @staticmethod
-    def load_image_array(img: Union[Image.Image, str, Path, np.ndarray], color_space: str = "RGB") -> np.ndarray:
+    def load_image_array(img: Union[Image.Image, str, Path, np.ndarray], color_space: str = "Lab") -> np.ndarray:
         # 支持 numpy array
         if isinstance(img, np.ndarray):
-            arr = img
+            arr = img.copy()
+            # 假设输入的numpy数组是BGR格式（如cv2读取的）
+            input_format = "BGR"
         # 支持 PIL Image
         elif isinstance(img, Image.Image):
+            # PIL图像转换为RGB格式的numpy数组
+            if img.mode != "RGB":
+                img = img.convert("RGB")
             arr = np.array(img)
+            input_format = "RGB"
         # 支持 网络 URL / Base64 / 本地路径
         elif isinstance(img, str) or isinstance(img, Path):
             img = str(img)  # 确保是字符串类型
@@ -35,34 +41,54 @@ class ImageSimilarity:
                     raise ValueError(f"无法加载网络图像: {img}")
                 img_pil = Image.open(BytesIO(resp.content)).convert("RGB")
                 arr = np.array(img_pil)
+                input_format = "RGB"
             # Base64 Data URI
             elif img.strip().startswith("data:"):
                 header, b64 = img.split(",", 1)
                 img_pil = Image.open(BytesIO(base64.b64decode(b64))).convert("RGB")
                 arr = np.array(img_pil)
+                input_format = "RGB"
             # 本地文件路径
             else:
-                arr = cv2.imread(img, cv2.IMREAD_UNCHANGED)
+                arr = cv2.imread(img, cv2.IMREAD_COLOR)
                 if arr is None:
                     raise ValueError(f"无法加载图像: {img}")
+                input_format = "BGR"
         else:
             raise ValueError("未知的图像类型。支持 PIL.Image.Image、str(URL/Base64/Path)、Path、np.ndarray。")
 
-        # 如果是 PIL 转换或 cv2 读取后的单通道或四通道，先转为 BGR 3通道
-        if arr.ndim == 2:
-            arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
-        elif arr.shape[2] == 4:
-            arr = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
-
+        # 统一颜色空间转换
         color_space = color_space.upper()
+
         if color_space == "HSV":
-            arr = cv2.cvtColor(arr, cv2.COLOR_BGR2HSV)
+            if input_format == "RGB":
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2HSV)
+            else:  # BGR
+                arr = cv2.cvtColor(arr, cv2.COLOR_BGR2HSV)
         elif color_space == "RGB":
-            arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-        elif color_space in ("GRAY", "L"):
-            gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
-            # 保持三维 `(H, W, 1)`
-            arr = gray[:, :, np.newaxis]
+            if input_format == "BGR":
+                arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+            # 如果已经是RGB，不需要转换
+        elif color_space == "YCBCR":
+            if input_format == "RGB":
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2YCrCb)
+            else:  # BGR
+                arr = cv2.cvtColor(arr, cv2.COLOR_BGR2YCrCb)
+        elif color_space == "GRAY":
+            if input_format == "RGB":
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+            else:  # BGR
+                arr = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+        elif color_space == "BGR":
+            if input_format == "RGB":
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+            # 如果已经是BGR，不需要转换
+        elif color_space == "LAB" or color_space == "CIELAB":
+            if input_format == "RGB":
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
+            else:  # BGR
+                arr = cv2.cvtColor(arr, cv2.COLOR_BGR2LAB)
+
         return arr
 
     @staticmethod
@@ -93,45 +119,98 @@ class ImageSimilarity:
         src_img: Union[Image.Image, str, Path, np.ndarray],
         target_img: Union[Image.Image, str, Path, np.ndarray],
         ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
-        color_space: str = "RGB",
+        color_space: str = "HSV",
         norm: str = "zscore",
         heatmap: bool = False,
         gray: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         src_array = ImageSimilarity.load_image_array(src_img, color_space)
         target_array = ImageSimilarity.load_image_array(target_img, color_space)
+
         if src_array.shape != target_array.shape:
             raise ValueError("源图像和目标图像的尺寸不匹配。")
 
-        if len(src_array.shape) == 3:
-            if color_space.upper() == "HSV":
-                # 一次转换到 int16 防止溢出
-                sa = src_array.astype(np.int16)
-                ta = target_array.astype(np.int16)
-                # Hue 通道差值，考虑环绕（0–180），并归一化到 [0,1]
-                dh = np.abs(sa[:, :, 0] - ta[:, :, 0])
-                h_norm = (np.minimum(dh, 180 - dh).astype(np.float32)) / 180.0
-                # S、V 通道差值并归一化到 [0,1]
-                sv_diff = cv2.absdiff(src_array[:, :, 1:], target_array[:, :, 1:]).astype(np.float32) / 255.0
-                # 对 H、S、V 三路差异取平均
-                diff_gray = (h_norm + sv_diff[:, :, 0] + sv_diff[:, :, 1]) / 3.0
-                diff_gray = diff_gray * 255
-            elif color_space.upper() == "RGB":
-                diff = cv2.absdiff(src_array, target_array).astype(np.float32)
-                diff_gray = diff.mean(axis=2)
-        elif color_space.upper() == "GRAY":
-            # 保持 float32 精度
-            diff_gray = cv2.absdiff(src_array, target_array).astype(np.float32)
-        else:
-            raise ValueError(f"不支持的颜色空间差异计算: {color_space}")
+        color_space_upper = color_space.upper()
 
-        # 归一化
+        if color_space_upper == "HSV":
+            # HSV 颜色空间处理
+            sa = src_array.astype(np.int16)
+            ta = target_array.astype(np.int16)
+
+            # 确定H通道的最大值
+            h_max = 179.0 if src_array.dtype == np.uint8 else 360.0
+
+            # Hue 通道差值，考虑环绕性
+            h_diff = np.abs(sa[:, :, 0] - ta[:, :, 0])
+            h_diff_wrapped = np.minimum(h_diff, h_max - h_diff)
+            h_norm = h_diff_wrapped * (255.0 / (h_max / 2.0))  # 缩放到0-255范围
+
+            # S、V 通道差值并归一化
+            s_diff = np.abs(sa[:, :, 1] - ta[:, :, 1])
+            v_diff = np.abs(sa[:, :, 2] - ta[:, :, 2])
+
+            # 综合H、S、V三通道差异，可以考虑加权
+            diff_gray = h_norm + s_diff + v_diff
+            # diff_gray = (h_norm * 0.5 + s_diff * 0.3 + v_diff * 0.2)
+
+        elif color_space_upper in ["LAB", "CIELAB"]:
+            src_lab = src_array.astype(np.float32)
+            target_lab = target_array.astype(np.float32)
+
+            # 统一的LAB数据归一化策略
+            # 检查并转换L通道到0-100范围
+            if src_lab[:, :, 0].max() > 100:
+                src_lab[:, :, 0] = src_lab[:, :, 0] * 100.0 / 255.0
+            if target_lab[:, :, 0].max() > 100:
+                target_lab[:, :, 0] = target_lab[:, :, 0] * 100.0 / 255.0
+
+            # 检查并转换a,b通道到-128到+127范围
+            # 如果最小值>=0，说明可能是0-255范围
+            if src_lab[:, :, 1:].min() >= 0:
+                src_lab[:, :, 1:] = src_lab[:, :, 1:] - 128.0
+            if target_lab[:, :, 1:].min() >= 0:
+                target_lab[:, :, 1:] = target_lab[:, :, 1:] - 128.0
+
+            # 计算Delta E
+            delta_l = src_lab[:, :, 0] - target_lab[:, :, 0]
+            delta_a = src_lab[:, :, 1] - target_lab[:, :, 1]
+            delta_b = src_lab[:, :, 2] - target_lab[:, :, 2]
+            delta_e = np.sqrt(delta_l**2 + delta_a**2 + delta_b**2)
+
+            max_delta_e = 10
+            diff_gray = np.clip(delta_e / max_delta_e, 0, 1)
+
+        elif color_space_upper == "RGB":
+            # RGB 颜色空间处理
+            diff = cv2.absdiff(src_array, target_array).astype(np.float32)
+            diff_gray = diff.mean(axis=2)
+
+        elif color_space_upper == "YCBCR":
+            # YCbCr 颜色空间处理
+            diff = cv2.absdiff(src_array, target_array).astype(np.float32)
+            diff_gray = diff.mean(axis=2)
+
+        elif color_space_upper == "GRAY":
+            # 灰度图像处理
+            if src_array.ndim == 3:
+                # 如果是3通道，转换为灰度（这里假设是RGB格式）
+                src_array = cv2.cvtColor(src_array, cv2.COLOR_RGB2GRAY)
+            if target_array.ndim == 3:
+                target_array = cv2.cvtColor(target_array, cv2.COLOR_RGB2GRAY)
+            diff_gray = cv2.absdiff(src_array, target_array).astype(np.float32)
+
+        else:
+            raise ValueError(f"不支持的颜色空间: {color_space}")
+
+        # 归一化处理
         diff_gray = ImageSimilarity.norm_method(diff_gray, norm)
         diff_gray = ImageSimilarity.apply_ref_mask(diff_gray, ref_mask)
+
         if heatmap:
             return ImageSimilarity.to_heatmap(diff_gray)
         elif gray:
-            return ImageSimilarity.to_grey(diff_gray)
+            return ImageSimilarity.to_gray(diff_gray)
+
         return diff_gray
 
     @staticmethod
@@ -141,6 +220,7 @@ class ImageSimilarity:
         ref_mask: Optional[Union[Image.Image, str, Path, np.ndarray]] = None,
         norm: str = "zscore",
         heatmap: bool = False,
+        gray: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         src_array = ImageSimilarity.load_image_array(src_img)
         target_array = ImageSimilarity.load_image_array(target_img)
@@ -158,6 +238,8 @@ class ImageSimilarity:
         diff_gray = ImageSimilarity.apply_ref_mask(diff_gray, ref_mask)
         if heatmap:
             return ImageSimilarity.to_heatmap(diff_gray)
+        elif gray:
+            return ImageSimilarity.to_gray(diff_gray)
         return diff_gray
 
     @staticmethod
@@ -208,7 +290,7 @@ class ImageSimilarity:
         if heatmap:
             return ImageSimilarity.to_heatmap(diff_gray)
         elif gray:
-            return ImageSimilarity.to_grey(diff_gray)
+            return ImageSimilarity.to_gray(diff_gray)
         return diff_gray
 
     @staticmethod
@@ -291,7 +373,7 @@ class ImageSimilarity:
         return Image.fromarray(cv2.cvtColor(heat, cv2.COLOR_BGR2RGB))
 
     @staticmethod
-    def to_grey(diff: np.ndarray) -> Image.Image:
+    def to_gray(diff: np.ndarray) -> Image.Image:
         # 断言 diff 是归一化到 [0, 1] 的数组
         if not (0 <= diff.min() <= 1 and 0 <= diff.max() <= 1):
             raise ValueError("差异图必须是归一化到 [0, 1] 的数组。")
@@ -299,3 +381,57 @@ class ImageSimilarity:
         # 直接把归一化后的值映射到 [0,255]，并生成 L 模式灰度图
         c_map = (diff * 255).round().astype(np.uint8)
         return Image.fromarray(c_map, mode="L")
+
+    @staticmethod
+    def get_sobel(
+        img: Union[Image.Image, str, Path, np.ndarray],
+        norm_method: str = "minmax",
+        smoothing_factor=0.1,
+    ) -> np.ndarray:
+        # 加载图像为灰度
+        img_array = ImageSimilarity.load_image_array(img, "GRAY")
+
+        # 确保是单通道灰度图
+        if img_array.ndim == 3:
+            img_gray = img_array[:, :, 0]
+        else:
+            img_gray = img_array
+
+        # 计算 x 方向的 Sobel 算子
+        sobel_x = cv2.Sobel(img_gray, cv2.CV_64F, 1, 0, ksize=3)
+
+        # 计算 y 方向的 Sobel 算子
+        sobel_y = cv2.Sobel(img_gray, cv2.CV_64F, 0, 1, ksize=3)
+
+        # 计算梯度幅值
+        sobel_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+
+        # 归一化到 [0, 1]
+        sobel_magnitude = ImageSimilarity.norm_method(sobel_magnitude, norm_method)
+
+        # 平滑处理
+        return sobel_magnitude / (sobel_magnitude + smoothing_factor)
+
+    @staticmethod
+    def get_canny(
+        img: Union[Image.Image, str, Path, np.ndarray],
+        norm_method: str = "zscore",
+        smoothing_factor=0.1,
+    ) -> np.ndarray:
+        # 加载图像为灰度
+        img_array = ImageSimilarity.load_image_array(img, "GRAY")
+
+        # 确保是单通道灰度图
+        if img_array.ndim == 3:
+            img_gray = img_array[:, :, 0]
+        else:
+            img_gray = img_array
+
+        # 使用 Canny 边缘检测
+        edges = cv2.Canny(img_gray, 100, 200)
+
+        # 归一化到 [0, 1]
+        edges_magnitude = ImageSimilarity.norm_method(edges, norm_method)
+
+        # 平滑处理
+        return edges_magnitude / (edges_magnitude + smoothing_factor)
