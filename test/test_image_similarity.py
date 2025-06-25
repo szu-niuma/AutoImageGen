@@ -11,6 +11,7 @@ from PIL import Image
 from auto_image_edit.utils.image_similarity import ImageSimilarity
 from auto_image_edit.utils.image_estimate import ImageEstimate
 from eval.mask_eval import post_process_mask
+from auto_image_edit.utils.image_sift import ImageSift
 
 
 # 新增：通用函数
@@ -40,16 +41,15 @@ def generate_np(src, dst, compare_func, **kwargs):
 
 # 原有代码块改为调用函数
 if __name__ == "__main__":
-    # src = "/home/yuyangxin/data/dataset/CocoGlide/Au/clock_267351.png"
-    # dst = "/home/yuyangxin/data/dataset/CocoGlide/Tp/glide_inpainting_val2017_267351_up.png"
+    src = "/home/yuyangxin/data/dataset/CocoGlide/Au/clock_267351.png"
+    dst = "/home/yuyangxin/data/dataset/CocoGlide/Tp/glide_inpainting_val2017_267351_up.png"
     # dst = "/home/yuyangxin/data/dataset/CocoGlide/glide_inpainting_val2017_267351_up_quality_90.jpg"
-    src = "/home/yuyangxin/data/dataset/custom_dataset/llm_edit/Au/real_069.jpg"
-    dst = "/home/yuyangxin/data/dataset/custom_dataset/llm_edit/Tp/fake_069.jpg"
+    # src = "/home/yuyangxin/data/dataset/custom_dataset/llm_edit/Au/real_069.jpg"
+    # dst = "/home/yuyangxin/data/dataset/custom_dataset/llm_edit/Tp/fake_069.jpg"
 
-    dst = Path(dst)
-    # generate_heatmap(src, dst, "./output/lpips_heatmap.png", ImageSimilarity.compare_images_lpips, norm="zscore")
-    lpips_diff = ImageSimilarity.compare_images_lpips(src, dst, heatmap=False, norm="zscore", gray=False)
-    pixel_diff = ImageSimilarity.compare_images_pixelwise(src, dst, heatmap=False, norm="zscore", gray=False, color_space="LAB")
+    lpips_diff = ImageSimilarity.compare_images_lpips(src, dst, heatmap=False, norm="zscore", gray=False, align=True)
+    pixel_diff = ImageSimilarity.compare_images_pixelwise(src, dst, heatmap=False, norm="zscore", gray=False, color_space="LAB", align=True)
+
     # ssim_diff = ImageSimilarity.compare_images_ssim(src, dst, heatmap=False, norm="zscore", gray=False)
     # rule_multi_diff = np.where((pixel_diff > 0) & (lpips_diff > 0), lpips_diff * pixel_diff * 255 * 255, lpips_diff + pixel_diff)
     # res = ImageSimilarity.norm_method(rule_multi_diff, norm_method="zscore")
@@ -60,9 +60,8 @@ if __name__ == "__main__":
     # res = np.where(pixel_diff > 0, lpips_diff, pixel_diff)
     # res = np.where(pixel_diff > 0, lpips_diff, pixel_diff)
     res = (pixel_diff + lpips_diff) / 2
-    res = post_process_mask(res, morphology_iterations=3, morphology_kernel_size=3)
     ImageSimilarity.to_heatmap(res).save("./output/lab_heatmap.png")
-    ImageSimilarity.to_gray(res).save("./output/lab_pixel.png")
+    # ImageSimilarity.to_gray(res).save("./output/lab_pixel.png")
 
     # # # 相加条件：当任一差异指标为0时，采用相加操作保留非零指标的贡献
     # # # 意义：避免因某一指标失效（如颜色未变但结构篡改）导致整体差异被抑制

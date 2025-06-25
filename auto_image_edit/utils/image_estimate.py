@@ -2,6 +2,8 @@ from typing import List
 import numpy as np
 from skimage.metrics import structural_similarity
 from sklearn.metrics import f1_score  # 新增依赖：pip install scikit-image
+from sklearn.metrics import roc_auc_score, average_precision_score
+from scipy.stats import pointbiserialr, spearmanr
 
 
 class ImageEstimate:
@@ -9,6 +11,11 @@ class ImageEstimate:
     def mse_with_weight(origin_img: np.ndarray, edited_img: np.ndarray) -> float:
         """
         加权均方误差：冷区权重=1，热区权重=原始值
+        提供整体误差的度量
+
+        MSE设计用于回归任务，测量数值预测的准确性
+        MSE值缺乏清晰的上下界, 难以直观解释
+
         公式：w_i = { 1 if y_i=0, y_i if y_i>0 }
         """
         # 创建权重矩阵：冷区=1，热区=原始值
@@ -26,6 +33,7 @@ class ImageEstimate:
     def mape_with_weight(origin_img: np.ndarray, edited_img: np.ndarray) -> float:
         """
         加权平均绝对百分比误差：冷区权重=1，热区权重=原始值
+        只能在正样本区域计算
         公式：w_i = { 1 if y_i=0, y_i if y_i>0 }
         """
         # 创建权重矩阵：冷区=1，热区=原始值
@@ -133,6 +141,7 @@ class ImageEstimate:
         ap = np.trapezoid(prec[order], x=rec[order])
         return float(ap)
 
+    @staticmethod
     def metric_f1(
         origin: np.ndarray,
         edited: np.ndarray,
@@ -156,6 +165,7 @@ class ImageEstimate:
             f1_list.append(f1)
         return np.mean(f1_list)
 
+    @staticmethod
     def metric_iou(
         origin: np.ndarray,
         edited: np.ndarray,
@@ -179,3 +189,69 @@ class ImageEstimate:
             iou = intersection / union if union > 0 else 0.0
             iou_list.append(iou)
         return np.mean(iou_list)
+
+    @staticmethod
+    def metric_pr_auc(origin: np.ndarray, edited: np.ndarray) -> float:
+        """
+        计算各阈值下的 AUC_PR和AUC_ROC
+        """
+        # auc_roc = roc_auc_score(origin, edited)
+        pr_score = average_precision_score(origin, edited)
+        return pr_score
+        # return {"auc_roc": auc_roc, "pr_score": pr_score}
+
+    @staticmethod
+    def metric_correlation(
+        origin: np.ndarray,
+        edited: np.ndarray,
+    ) -> dict:
+        """
+        计算点二列相关系数和斯皮尔曼相关系数
+        """
+        # 确保输入是一维数组
+        origin_flat = origin.flatten()
+        edited_flat = edited.flatten()
+
+        # 斯皮尔曼相关系数
+        spearmanr_corr, spearman_p_value = spearmanr(origin_flat, edited_flat)
+        return spearmanr_corr
+
+    @staticmethod
+    def metric_soft_iou(origin: np.ndarray, edited: np.ndarray, epsilon=1e-6) -> np.ndarray:
+        """
+        计算各阈值下的 Soft IoU
+        """
+        if origin.shape != edited.shape:
+            raise ValueError("Origin and edited images must have the same shape.")
+
+        # 确保输入是浮点类型
+        edited = edited.astype(np.float32)
+        origin = origin.astype(np.float32)
+        # 软交集 (Soft Intersection)
+        # 逐元素相乘，然后求和
+        intersection = np.sum(edited * origin)
+        # 软并集 (Soft Union)
+        # 公式: P(A union B) = P(A) + P(B) - P(A intersection B)
+        # 同样逐元素计算后求和
+        union = np.sum(edited + origin - edited * origin)
+        # 计算 Soft IoU
+        # 加上 epsilon 防止分母为零
+        iou = intersection / (union + epsilon)
+        return iou
+
+    @staticmethod
+    def metric(gt_mask, pred_mask):
+        # 确保输入是一维数组
+        gt_mask_flat = gt_mask.flatten()
+        pred_mask_flat = pred_mask.flatten()
+
+        # 检查是否为常数数组
+        if len(np.unique(gt_mask_flat)) == 1 or len(np.unique(pred_mask_flat)) == 1:
+            raise ValueError("输入数组不能是常数数组")
+        ret = {}
+        ret["pr_auc"] = ImageEstimate.metric_pr_auc(gt_mask_flat, pred_mask_flat)
+        ret["wmse"] = ImageEstimate.mse_with_weight(gt_mask_flat, pred_mask_flat)
+        ret["soft_iou"] = ImageEstimate.metric_soft_iou(gt_mask_flat, pred_mask_flat)
+        ret["r_square"] = ImageEstimate.metric_r_square(gt_mask_flat, pred_mask_flat)
+        ret["ssim"] = ImageEstimate.metric_ssim(gt_mask_flat, pred_mask_flat)
+        return ret

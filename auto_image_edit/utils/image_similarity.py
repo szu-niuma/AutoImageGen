@@ -8,9 +8,13 @@ import cv2
 import numpy as np
 import requests
 from PIL import Image, ImageDraw, ImageFont
+
 from skimage.metrics import structural_similarity as ssim
+
 import torch
 import lpips
+
+from .image_sift import ImageSift
 
 
 class ImageSimilarity:
@@ -123,12 +127,16 @@ class ImageSimilarity:
         norm: str = "zscore",
         heatmap: bool = False,
         gray: bool = False,
+        align: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         src_array = ImageSimilarity.load_image_array(src_img, color_space)
         target_array = ImageSimilarity.load_image_array(target_img, color_space)
 
         if src_array.shape != target_array.shape:
             raise ValueError("源图像和目标图像的尺寸不匹配。")
+
+        if align:
+            src_array, target_array, _ = ImageSift.align_images(src_array, target_array)
 
         color_space_upper = color_space.upper()
 
@@ -246,18 +254,29 @@ class ImageSimilarity:
     def check_and_resize(
         src_img: Union[Image.Image, str, Path, np.ndarray],
         target_img: Union[Image.Image, str, Path, np.ndarray],
-    ) -> Image.Image:
+    ) -> Tuple[Image.Image, Image.Image]:
         """
-        检查 src_img 和 target_img 的尺寸是否一致。
-        如果不一致，则将 target_img 调整到与 src_img 相同的尺寸并返回调整后的数组；
-        否则返回 None。
+        对 src_img 和 target_img 同时先放大到两者最大尺寸，再缩小到两者最小尺寸，
+        最终输出相同大小的两张 PIL.Image。
         """
         src_array = ImageSimilarity.load_image_array(src_img)
         tgt_array = ImageSimilarity.load_image_array(target_img)
-        if src_array.shape != tgt_array.shape:
-            h, w = src_array.shape[:2]
-            tgt_array = cv2.resize(tgt_array, (w, h), interpolation=cv2.INTER_AREA)
-        return Image.fromarray(tgt_array.astype(np.uint8), mode="RGB")
+
+        h1, w1 = src_array.shape[:2]
+        h2, w2 = tgt_array.shape[:2]
+        # 先放大到最大尺寸
+        up_h, up_w = 512, 512  # 假设最大尺寸为 512x512
+        src_up = cv2.resize(src_array, (up_w, up_h), interpolation=cv2.INTER_CUBIC)
+        tgt_up = cv2.resize(tgt_array, (up_w, up_h), interpolation=cv2.INTER_CUBIC)
+
+        # 再缩小到最小尺寸
+        down_h, down_w = min(h1, h2), min(w1, w2)
+        src_down = cv2.resize(src_up, (down_w, down_h), interpolation=cv2.INTER_AREA)
+        tgt_down = cv2.resize(tgt_up, (down_w, down_h), interpolation=cv2.INTER_AREA)
+
+        src_out = Image.fromarray(src_down.astype(np.uint8), mode="RGB")
+        tgt_out = Image.fromarray(tgt_down.astype(np.uint8), mode="RGB")
+        return src_out, tgt_out
 
     @staticmethod
     def compare_images_lpips(
@@ -267,6 +286,7 @@ class ImageSimilarity:
         norm="zscore",
         heatmap: bool = False,
         gray: bool = False,
+        align: bool = False,
     ) -> Union[Image.Image, np.ndarray]:
         """
         使用 LPIPS (Learned Perceptual Image Patch Similarity) 库比较两张图像的相似度。
@@ -277,6 +297,9 @@ class ImageSimilarity:
         target_array = ImageSimilarity.load_image_array(img_fake)
         if src_array.shape != target_array.shape:
             raise ValueError("源图像和目标图像的尺寸不一致。")
+
+        if align:
+            src_array, target_array, _ = ImageSift.align_images(src_array, target_array)
 
         src_tensor = lpips.im2tensor(src_array)
         target_tensor = lpips.im2tensor(target_array)

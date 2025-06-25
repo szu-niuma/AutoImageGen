@@ -8,13 +8,9 @@ import numpy as np
 from sklearn.metrics import f1_score, jaccard_score, precision_score, recall_score
 from sklearn.preprocessing import binarize
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import lru_cache, partial
 import threading
-from sklearn.metrics import roc_auc_score, average_precision_score
-from scipy.stats import pointbiserialr, spearmanr
 from scipy.stats import entropy
-from skimage import filters
-from skimage.morphology import disk
+
 from scipy import ndimage
 import sys
 
@@ -24,131 +20,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from PIL import Image
 from auto_image_edit.utils.image_similarity import ImageSimilarity
 from auto_image_edit.utils.image_estimate import ImageEstimate
-
-
-def metric(gt_mask, pred_mask, threshold=0):
-    """
-    计算IOU和F1分数，使用库函数优化
-
-    Args:
-        gt_mask: 真实mask，numpy数组
-        pred_mask: 预测mask，numpy数组
-        threshold: 二值化阈值
-
-    Returns:
-        dict: 包含多个评估指标的字典
-    """
-    # 使用sklearn的binarize函数进行二值化
-    gt_binary = binarize(gt_mask.reshape(-1, 1), threshold=threshold).flatten().astype(int)
-    pred_binary = binarize(pred_mask.reshape(-1, 1), threshold=threshold).flatten().astype(int)
-
-    # 使用sklearn计算多个指标
-    iou = jaccard_score(gt_binary, pred_binary, average="binary", zero_division=0).item()
-    f1 = f1_score(gt_binary, pred_binary, average="binary", zero_division=0)
-    precision = precision_score(gt_binary, pred_binary, average="binary", zero_division=0)
-    recall = recall_score(gt_binary, pred_binary, average="binary", zero_division=0)
-    return {
-        "iou": iou,
-        "f1": f1,
-        "precision": precision,
-        "recall": recall,
-    }
-
-
-def metric_auc(gt_mask, pred_mask):
-
-    # 确保输入是一维数组
-    gt_mask_flat = gt_mask.flatten()
-    pred_mask_flat = pred_mask.flatten()
-
-    # 检查是否为常数数组
-    if len(np.unique(gt_mask_flat)) == 1 or len(np.unique(pred_mask_flat)) == 1:
-        raise ValueError("输入数组不能是常数数组")
-
-    auc_roc = roc_auc_score(gt_mask_flat, pred_mask_flat)
-    auc_pr = average_precision_score(gt_mask_flat, pred_mask_flat)
-
-    # 点二列相关系数
-    correlation, p_value = pointbiserialr(gt_mask_flat, pred_mask_flat)
-    if (-1 <= correlation.item() <= 1) is False:
-        raise ValueError("点二列相关系数应在[-1, 1]范围内")
-    # # 斯皮尔曼相关系数
-    # spearmanr_corr, spearman_p_value = spearmanr(gt_mask_flat, pred_mask_flat)
-    return {
-        "pointbiserialr": correlation.item(),
-        "auc_roc": auc_roc.item(),
-        "auc_pr": auc_pr.item(),
-    }
-
-
-def entropy_fusion(diff_map, lpips_map, window_size=5):
-    """
-    基于局部熵的图像融合方法
-
-    Args:
-        diff_map: 差异图像 (H, W)，已归一化到[0,1]
-        ssim_map: SSIM图像 (H, W)，已归一化到[0,1]
-        lpips_map: LPIPS图像 (H, W)，已归一化到[0,1]
-        window_size: 局部窗口大小，默认为5
-
-    Returns:
-        fused_map: 融合后的图像 (H, W)，范围[0,1]
-    """
-
-    @lru_cache(maxsize=8)
-    def _get_structure_element(radius):
-        """缓存结构元素以避免重复创建"""
-        return disk(radius)
-
-    def local_entropy(image, window_size=5):
-        """
-        计算局部熵，针对已归一化输入进行优化
-        """
-        # 确保window_size是奇数且合理
-        window_size = max(3, window_size if window_size % 2 == 1 else window_size + 1)
-        radius = window_size // 2
-
-        # 由于输入已归一化到[0,1]，直接转换为uint8
-        image_uint8 = (image * 255).astype(np.uint8)
-
-        # 使用缓存的结构元素
-        selem = _get_structure_element(radius)
-
-        # 计算局部熵
-        entropy_map = filters.rank.entropy(image_uint8, selem)
-
-        # 优化的归一化：直接除以理论最大值
-        max_entropy = np.log2(256)  # 8位图像的最大熵
-        return (entropy_map.astype(np.float32) / max_entropy).clip(0, 1)
-
-    # 快速输入验证
-    maps = [diff_map, lpips_map]
-    if not all(isinstance(img, np.ndarray) and img.ndim == 2 for img in maps):
-        raise ValueError("所有输入必须是2D numpy数组")
-
-    shape = diff_map.shape
-    if not all(img.shape == shape for img in maps[1:]):
-        raise ValueError("所有输入图像必须具有相同的尺寸")
-
-    # 批量计算局部熵
-    try:
-        entropies = [local_entropy(img, window_size) for img in maps]
-    except Exception as e:
-        raise RuntimeError(f"计算局部熵时出错: {e}")
-
-    # 向量化权重计算
-    entropy_stack = np.stack(entropies, axis=0)  # (3, H, W)
-    total_entropy = np.sum(entropy_stack, axis=0) + 1e-10  # 避免除零
-
-    # 计算权重
-    weights = entropy_stack / total_entropy[None, ...]  # 广播除法
-
-    # 向量化融合
-    map_stack = np.stack(maps, axis=0)  # (3, H, W)
-    fused_map = np.sum(weights * map_stack, axis=0)
-
-    # 由于输入已归一化，输出应该也在[0,1]范围内，但仍进行裁剪确保安全
-    return np.clip(fused_map, 0, 1).astype(np.float32)
+from auto_image_edit.utils.image_mask_gen import ImageMaskGen
 
 
 def post_process_mask(
@@ -212,6 +84,22 @@ def post_process_mask(
     return (mask_binary / 255.0).astype(np.float32)
 
 
+def pre_process_mask(real_img, fake_img, target_size=(2048, 2048)):
+    """
+    target_size: 目标尺寸(64,64) - (1024,1024)
+    """
+    # real_img = Image.open(real_img).convert("RGB")
+    # original_size = (real_img.width, real_img.height)  # 保存原始尺寸
+    # real_img = real_img.resize(target_size, Image.LANCZOS)
+    # real_img = real_img.resize(original_size, Image.LANCZOS)  # 恢复到原始尺寸
+
+    # fake_img = Image.open(fake_img).convert("RGB")
+    # original_size = (fake_img.width, fake_img.height)  # 保存原始尺寸
+    # fake_img = fake_img.resize(target_size, Image.LANCZOS)
+    # fake_img = fake_img.resize(original_size, Image.LANCZOS)  # 恢复到原始尺寸
+    return real_img, fake_img
+
+
 def process_single_item(item, norm):
     """
     处理单个数据项的函数，用于并发执行
@@ -231,57 +119,27 @@ def process_single_item(item, norm):
         # 只要H, W,不要C
         gt_mask = gt_mask[:, :, 0] if gt_mask.ndim == 3 else gt_mask
 
-        real_img = item["real_image"]
-        fake_img = item["fake_image"]
+        real_img, fake_img = pre_process_mask(item["real_image"], item["fake_image"], target_size=(1024, 1024))
 
         # 对每种type计算差异
         diffs = {}
-
         lpips_diff = ImageSimilarity.compare_images_lpips(real_img, fake_img, heatmap=False, norm=norm, gray=False)
         pixel_diff = ImageSimilarity.compare_images_pixelwise(real_img, fake_img, heatmap=False, norm=norm, gray=False, color_space="lab")
-        ssim_diff = ImageSimilarity.compare_images_ssim(real_img, fake_img, heatmap=False, norm=norm, gray=False)
-
-        diffs["pixel"] = pixel_diff
-        diffs["lpips"] = lpips_diff
-        diffs["ssim"] = ssim_diff
-
-        # # rule_replace type
-        # diffs["lpips_replace_pixel"] = np.where(pixel_diff > 0, lpips_diff, pixel_diff)
-
-        # # pixel_multiplication type
-        # diffs["pixel_multiplication"] = lpips_diff * pixel_diff
-
-        # # rule_multiplication type
-        # rule_multi_diff = np.where((pixel_diff > 0) & (lpips_diff > 0), lpips_diff * pixel_diff * 255 * 255, lpips_diff + pixel_diff)
-        # diffs["rule_multiplication"] = ImageSimilarity.norm_method(rule_multi_diff, norm_method=norm)
-
-        # # adapter type
-        # canny = ImageSimilarity.get_canny(real_img)
-        # diffs["adapter"] = canny * lpips_diff + (1 - canny) * pixel_diff
-
-        ## 信息熵线性组合
-        # diffs["entropy_fusion"] = entropy_fusion(pixel_diff, lpips_diff, window_size=5)
 
         ## 线性组合
-        diffs["linear_combination"] = (pixel_diff + lpips_diff) / 2.0
+        diffs["lpips_replace_pixel"] = ImageMaskGen.lpips_replace_pixel(pixel_diff, lpips_diff)
+        diffs["pixel_multiplication"] = ImageMaskGen.pixel_multiplication(pixel_diff, lpips_diff)
+        diffs["rule_multiplication"] = ImageMaskGen.rule_multiplication(pixel_diff, lpips_diff)
 
-        post_diff = post_process_mask(
-            diffs["linear_combination"],
-            morphology_kernel_size=1,
-            morphology_iterations=1,
-            use_connected_components=False,
-            min_area_threshold=2,
-        )
-        diffs["linear_combination_opt"] = (post_diff + lpips_diff) / 2.0
+        canny_diff = ImageSimilarity.get_canny(fake_img)
+        diffs["adapter"] = ImageMaskGen.adapter(pixel_diff, lpips_diff, canny_diff)
 
-        # ## 自适应乘法
-        # canny = ImageSimilarity.get_canny(real_img)
-        # diffs["adapter_multiplication"] = canny * lpips_diff * (1 - canny) * pixel_diff
-
+        diffs["entropy_fusion"] = ImageMaskGen.entropy_fusion(pixel_diff, lpips_diff)
+        diffs["linear_combination"] = ImageMaskGen.linear_weight(pixel_diff, lpips_diff)
         # 对每种type计算指标
         results = {}
         for key, item in diffs.items():
-            results[key] = metric_auc(gt_mask, item)
+            results[key] = ImageEstimate.metric(gt_mask, item)
         return results
 
     except Exception as e:
@@ -429,7 +287,7 @@ def main(json_file, norm="zscore", max_workers=None):
 
 if __name__ == "__main__":
     # 使用多线程处理，可以自定义参数
-    main("/data0/yuyangxin/dataset/coverage/ins.json", norm="zscore", max_workers=32)
+    main("/data0/yuyangxin/dataset/coverage/ins.json", norm="zscore", max_workers=1)
     main("/home/yuyangxin/data/dataset/CocoGlide/cocoGlide.json", norm="zscore", max_workers=32)
     # main("/data0/yuyangxin/dataset/AutoSplice/auto_splice.json", norm="zscore", max_workers=32)
     # main("/data0/yuyangxin/dataset/AutoSplice/auto_splice_90.json", norm="zscore", max_workers=32)
