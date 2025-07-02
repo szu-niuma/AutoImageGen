@@ -4,6 +4,8 @@ from collections import defaultdict
 import csv
 import json
 import os
+from pathlib import Path
+import shutil
 import cv2
 import numpy as np
 from sklearn.metrics import f1_score, jaccard_score, precision_score, recall_score
@@ -24,84 +26,23 @@ from auto_image_edit.utils.image_estimate import ImageEstimate
 from auto_image_edit.utils.image_mask_gen import ImageMaskGen
 
 
-def post_process_mask(
-    mask,
-    morphology_kernel_size=2,
-    morphology_iterations=1,
-    min_area_threshold=2,  # 新增：最小连通区域面积阈值
-    use_connected_components=True,  # 新增：是否使用连通组件分析
-):
-    """
-    会降低性能 -- 不处理
-    对掩码图像进行后处理: 使用形态学操作和连通组件分析去除孤立噪点。
-
-    Args:
-        mask: 输入掩码图像 (numpy array)
-        morphology_kernel_size: 形态学操作核大小
-        morphology_iterations: 形态学操作迭代次数
-        min_area_threshold: 最小连通区域面积阈值，小于此值的区域将被移除
-        use_connected_components: 是否使用连通组件分析
-    Returns:
-        processed_mask: 处理后的掩码图像
-    """
-    # 确保输入是numpy数组
-    if not isinstance(mask, np.ndarray):
-        mask = np.array(mask)
-
-    # 转换为单通道灰度图
-    if len(mask.shape) == 3:
-        mask = cv2.cvtColor(mask, cv2.COLOR_RGB2GRAY)
-
-    # 二值化处理
-    if mask.dtype != np.uint8:
-        mask = (mask * 255).astype(np.uint8)
-    _, mask_binary = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-
-    # 方法1: 形态学操作 - 开运算去除小噪点
-    if morphology_kernel_size > 0:
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morphology_kernel_size, morphology_kernel_size))
-        mask_binary = cv2.morphologyEx(mask_binary, cv2.MORPH_OPEN, kernel, iterations=morphology_iterations)
-
-        # 可选：闭运算填补空洞
-        mask_binary = cv2.morphologyEx(mask_binary, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-    # 方法2: 连通组件分析去除小区域
-    if use_connected_components and min_area_threshold > 0:
-        # 查找连通组件
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_binary, connectivity=8)
-
-        # 创建输出mask
-        filtered_mask = np.zeros_like(mask_binary)
-
-        # 保留面积大于阈值的连通组件（跳过背景标签0）
-        for i in range(1, num_labels):
-            area = stats[i, cv2.CC_STAT_AREA]
-            if area >= min_area_threshold:
-                filtered_mask[labels == i] = 255
-
-        mask_binary = filtered_mask
-
-    # 转换回原始数据类型
-    return (mask_binary / 255.0).astype(np.float32)
-
-
-def pre_process_mask(real_img, fake_img, target_size=(2048, 2048)):
+def pre_process_mask(real_img, fake_img, target_size=(1024, 1024)):
     """
     target_size: 目标尺寸(64,64) - (1024,1024)
     """
-    # real_img = Image.open(real_img).convert("RGB")
-    # original_size = (real_img.width, real_img.height)  # 保存原始尺寸
-    # real_img = real_img.resize(target_size, Image.LANCZOS)
-    # real_img = real_img.resize(original_size, Image.LANCZOS)  # 恢复到原始尺寸
+    real_img = Image.open(real_img).convert("RGB")
+    original_size = (real_img.width, real_img.height)  # 保存原始尺寸
+    real_img = real_img.resize(target_size, Image.LANCZOS)
+    real_img = real_img.resize(original_size, Image.LANCZOS)  # 恢复到原始尺寸
 
-    # fake_img = Image.open(fake_img).convert("RGB")
-    # original_size = (fake_img.width, fake_img.height)  # 保存原始尺寸
-    # fake_img = fake_img.resize(target_size, Image.LANCZOS)
-    # fake_img = fake_img.resize(original_size, Image.LANCZOS)  # 恢复到原始尺寸
+    fake_img = Image.open(fake_img).convert("RGB")
+    original_size = (fake_img.width, fake_img.height)  # 保存原始尺寸
+    fake_img = fake_img.resize(target_size, Image.LANCZOS)
+    fake_img = fake_img.resize(original_size, Image.LANCZOS)  # 恢复到原始尺寸
     return real_img, fake_img
 
 
-def process_single_item(item, norm):
+def process_single_item(item, norm, output="./error_example"):
     """
     处理单个数据项的函数，用于并发执行
 
@@ -120,34 +61,56 @@ def process_single_item(item, norm):
         # 只要H, W,不要C
         gt_mask = gt_mask[:, :, 0] if gt_mask.ndim == 3 else gt_mask
 
-        real_img, fake_img = pre_process_mask(item["real_image"], item["fake_image"], target_size=(1024, 1024))
+        real_img, fake_img = item["real_image"], item["fake_image"]
 
-        # 对每种type计算差异
+        # 计算不同颜色空间的像素差异并保存到字典中
         diffs = {}
-        lpips_diff = ImageSimilarity.compare_images_lpips(real_img, fake_img, heatmap=False, norm=norm, gray=False)
-        pixel_diff = ImageSimilarity.compare_images_pixelwise(real_img, fake_img, heatmap=False, norm=norm, gray=False, color_space="lab")
-
-        diffs["pixel"] = pixel_diff
-        diffs["lpips"] = lpips_diff
-        diffs["sigmoid_weight"] = ImageMaskGen.sigmoid_weight(pixel_diff, lpips_diff)
-        diffs["entropy_fusion"] = ImageMaskGen.entropy_fusion(pixel_diff, lpips_diff)
-
-        canny_diff = ImageSimilarity.get_canny(real_img)
-        diffs["canny_adapter"] = ImageMaskGen.adapter(pixel_diff, lpips_diff, canny_diff)
-        diffs["linear_weight"] = ImageMaskGen.linear_weight(pixel_diff, lpips_diff, weight=0.5)  # 处理掩码
-
-        ## 乘法
-        diffs["rule_multiplication"] = ImageMaskGen.rule_multiplication(pixel_diff, lpips_diff)
-        diffs["square_multiplication"] = ImageMaskGen.rule_multiplication(pixel_diff, lpips_diff, alpha=0.5)
-        diffs["sqrt_multiplication"] = ImageMaskGen.rule_multiplication(pixel_diff, lpips_diff, alpha=2)
-
-        ## L2范数加权
-        diffs["l2_weight"] = ImageMaskGen.l2_weight(pixel_diff, lpips_diff, weight=0.5)
+        diffs["lpips"] = ImageSimilarity.compare_images_lpips(real_img, fake_img, heatmap=False, norm=norm, gray=False)
+        diffs["rgb"] = ImageSimilarity.compare_images_pixelwise(real_img, fake_img, heatmap=False, norm=norm, gray=False, color_space="rgb")
+        diffs["hsv"] = ImageSimilarity.compare_images_pixelwise(real_img, fake_img, heatmap=False, norm=norm, gray=False, color_space="hsv")
+        diffs["ycbcr"] = ImageSimilarity.compare_images_pixelwise(
+            real_img, fake_img, heatmap=False, norm=norm, gray=False, color_space="ycbcr"
+        )
+        diffs["lab"] = ImageSimilarity.compare_images_pixelwise(
+            real_img, fake_img, heatmap=False, norm=norm, gray=False, color_space="lab", ciede_version="ciede76"
+        )
+        diffs["lab94"] = ImageSimilarity.compare_images_pixelwise(
+            real_img, fake_img, heatmap=False, norm=norm, gray=False, color_space="lab", ciede_version="ciede94"
+        )
+        diffs["lab2000"] = ImageSimilarity.compare_images_pixelwise(
+            real_img, fake_img, heatmap=False, norm=norm, gray=False, color_space="lab", ciede_version="ciede2000"
+        )
 
         # 对每种type计算指标
         results = {}
-        for key, item in diffs.items():
-            results[key] = ImageEstimate.metric(gt_mask, item)
+        for key, diff_item in diffs.items():
+            results[key], judge = ImageEstimate.metric_colorspace(gt_mask, diff_item)
+            # if judge is False:
+            #     try:
+            #         # 评估不过关, 保存对应的图片
+            #         file_path = Path(item["real_image"])
+            #         file_type = file_path.parent.parent.name  # 获取文件所在目录名作为类型
+
+            #         # 创建保存目录结构
+            #         save_dir = os.path.join(output, file_type, key, file_path.stem)
+            #         os.makedirs(save_dir, exist_ok=True)
+
+            #         # 构建输出路径
+            #         real_img_path = f"{save_dir}/real_image.png"
+            #         fake_img_path = f"{save_dir}/fake_image.png"
+            #         gt_mask_path = f"{save_dir}/gt_mask.png"
+            #         pred_mask_path = f"{save_dir}/pred_mask.png"
+
+            #         # 保存原图和伪造图
+            #         shutil.copy(item["real_image"], real_img_path)
+            #         shutil.copy(item["fake_image"], fake_img_path)
+
+            #         # 保存掩码图像
+            #         Image.fromarray((gt_mask * 255).astype(np.uint8)).save(gt_mask_path)
+            #         Image.fromarray((diff_item * 255).astype(np.uint8)).save(pred_mask_path)
+            #     except Exception as e:
+            #         print(f"保存图像时出错: {e}")
+
         return results
 
     except Exception as e:
@@ -256,7 +219,7 @@ def main(json_file, norm="zscore", max_workers=None, csv_output=None):
             else:
                 table_data[method_name][metric_name] = 0.0
 
-    # # 输出评估结果表格 - 按方法分组显示
+    # 输出评估结果表格 - 按方法分组显示
     # print(f"\n=== 评估结果平均值 (按方法分组) ===")
     # print(f"{'Method':<20} {'Metric':<15} {'Mean':<12}")
     # print("=" * 47)
@@ -269,26 +232,26 @@ def main(json_file, norm="zscore", max_workers=None, csv_output=None):
     #     print("-" * 47)
 
     # 输出评估结果表格 - 按指标分组显示（便于对比）
-    # print(f"\n=== 评估结果平均值 (按指标分组对比) ===")
-    # header = f"{'Metric':<30}"
-    # for method_name in method_names:
-    #     header += f"{method_name:<30}"
-    # print(header)
-    # print("=" * (15 + 12 * len(method_names)))
+    print(f"\n=== 评估结果平均值 (按指标分组对比) ===")
+    header = f"{'Metric':<20}"
+    for method_name in method_names:
+        header += f"{method_name:<20}"
+    print(header)
+    print("=" * (15 + 12 * len(method_names)))
 
-    # for metric_name in metric_names:
-    #     row = f"{metric_name:<30}"
-    #     for method_name in method_names:
-    #         avg_value = table_data[method_name][metric_name]
-    #         row += f"{avg_value:<30.4f}"
-    #     print(row)
+    for metric_name in metric_names:
+        row = f"{metric_name:<20}"
+        for method_name in method_names:
+            avg_value = table_data[method_name][metric_name]
+            row += f"{avg_value:<20.4f}"
+        print(row)
 
-    # # 输出处理统计信息
-    # print(f"\n=== 处理统计 ===")
-    # print(f"成功处理: {processed_count}/{len(data)} ({processed_count/len(data)*100:.1f}%)")
+    # 输出处理统计信息
+    print(f"\n=== 处理统计 ===")
+    print(f"成功处理: {processed_count}/{len(data)} ({processed_count/len(data)*100:.1f}%)")
 
-    # if error_count > 0:
-    #     print(f"处理失败: {error_count}")
+    if error_count > 0:
+        print(f"处理失败: {error_count}")
 
     # 保存结果到csv文件
     if csv_output:
@@ -322,7 +285,6 @@ def main(json_file, norm="zscore", max_workers=None, csv_output=None):
 
 
 if __name__ == "__main__":
-    # 使用多线程处理，可以自定义参数
     main(
         "/data0/yuyangxin/dataset/coverage/ins.json",
         norm="zscore",

@@ -1,14 +1,16 @@
+from collections import OrderedDict
 from typing import List
 import numpy as np
 from skimage.metrics import structural_similarity
-from sklearn.metrics import f1_score  # 新增依赖：pip install scikit-image
+from sklearn.metrics import f1_score, accuracy_score, jaccard_score
+
 from sklearn.metrics import roc_auc_score, average_precision_score
 from scipy.stats import pointbiserialr, spearmanr
 
 
 class ImageEstimate:
     @staticmethod
-    def mse_with_weight(origin_img: np.ndarray, edited_img: np.ndarray) -> float:
+    def mse_with_weight(origin_img: np.ndarray, edited_img: np.ndarray, weight=None) -> float:
         """
         加权均方误差：冷区权重=1，热区权重=原始值
         提供整体误差的度量
@@ -19,7 +21,12 @@ class ImageEstimate:
         公式：w_i = { 1 if y_i=0, y_i if y_i>0 }
         """
         # 创建权重矩阵：冷区=1，热区=原始值
-        weight = np.where(origin_img == 0, 1, origin_img)
+        if weight == 1:
+            # 使用统一权重1
+            weight = np.ones_like(origin_img)
+        else:
+            # 使用原规则：冷区=1，热区=原始值
+            weight = np.where(origin_img == 0, 1, origin_img)
 
         sum_w = np.sum(weight)
         if sum_w == 0:
@@ -145,32 +152,38 @@ class ImageEstimate:
     def metric_f1(
         origin: np.ndarray,
         edited: np.ndarray,
-        start_threshold: float,
-        end_threshold: float,
-        step: float = 0.1,
         average: str = "binary",
+        start_threshold: float = 0.0,
+        end_threshold: float = None,
+        step: float = 0.1,
     ) -> np.ndarray:
         """
         计算各阈值下的 F1
+        当end_threshold为None时，仅使用start_threshold计算F1值
+        否则计算[start_threshold, end_threshold]范围内的平均F1
         """
         if origin.shape != edited.shape:
             raise ValueError("Origin and edited images must have the same shape.")
 
-        thresholds = np.arange(start_threshold, end_threshold + step / 2, step)
-        f1_list = []
-        for thr in thresholds:
-            bin_o = (origin > thr).ravel()
-            bin_e = (edited > thr).ravel()
-            f1 = f1_score(bin_o, bin_e, average=average)
-            f1_list.append(f1)
-        return np.mean(f1_list)
+        if end_threshold is None:
+            return f1_score(origin, edited, average=average)
+        else:
+            # 计算多个阈值的F1均值
+            thresholds = np.arange(start_threshold, end_threshold + step / 2, step)
+            f1_list = []
+            for thr in thresholds:
+                bin_o = (origin > thr).ravel()
+                bin_e = (edited > thr).ravel()
+                f1 = f1_score(bin_o, bin_e, average=average)
+                f1_list.append(f1)
+            return np.mean(f1_list)
 
     @staticmethod
     def metric_iou(
         origin: np.ndarray,
         edited: np.ndarray,
-        start_threshold: float,
-        end_threshold: float,
+        start_threshold: float = 0.0,
+        end_threshold: float = None,
         step: float = 0.1,
     ) -> np.ndarray:
         """
@@ -179,16 +192,51 @@ class ImageEstimate:
         if origin.shape != edited.shape:
             raise ValueError("Origin and edited images must have the same shape.")
 
-        thresholds = np.arange(start_threshold, end_threshold + step / 2, step)
-        iou_list = []
-        for thr in thresholds:
-            bin_o = (origin > thr).ravel()
-            bin_e = (edited > thr).ravel()
-            intersection = np.logical_and(bin_o, bin_e).sum()
-            union = np.logical_or(bin_o, bin_e).sum()
-            iou = intersection / union if union > 0 else 0.0
-            iou_list.append(iou)
-        return np.mean(iou_list)
+        if end_threshold is None:
+            return jaccard_score(origin, edited)
+        else:
+            # 计算多个阈值的IoU均值
+            thresholds = np.arange(start_threshold, end_threshold + step / 2, step)
+            iou_list = []
+            for thr in thresholds:
+                bin_o = (origin > thr).ravel()
+                bin_e = (edited > thr).ravel()
+                intersection = np.logical_and(bin_o, bin_e).sum()
+                union = np.logical_or(bin_o, bin_e).sum()
+                iou = intersection / union if union > 0 else 0.0
+                iou_list.append(iou)
+            return np.mean(iou_list)
+
+    @staticmethod
+    def metric_acc(
+        origin: np.ndarray,
+        edited: np.ndarray,
+        start_threshold: float = 0.0,
+        end_threshold: float = None,
+        step: float = 0.1,
+    ) -> np.ndarray:
+        """
+        计算各阈值下的准确率(Accuracy)
+        当end_threshold为None时，仅使用start_threshold计算准确率
+        否则计算[start_threshold, end_threshold]范围内的平均准确率
+
+        准确率 = (TP + TN) / 总像素数
+        """
+        if origin.shape != edited.shape:
+            raise ValueError("Origin and edited images must have the same shape.")
+
+        if end_threshold is None:
+            return accuracy_score(origin, edited)
+        else:
+            # 计算多个阈值的准确率均值
+            thresholds = np.arange(start_threshold, end_threshold + step / 2, step)
+            acc_list = []
+            for thr in thresholds:
+                bin_o = (origin > thr).ravel()
+                bin_e = (edited > thr).ravel()
+                accuracy = np.sum(bin_o == bin_e) / len(bin_o)
+                acc_list.append(accuracy)
+            return np.mean(acc_list)
 
     @staticmethod
     def metric_pr_auc(origin: np.ndarray, edited: np.ndarray) -> float:
@@ -248,10 +296,43 @@ class ImageEstimate:
         # 检查是否为常数数组
         if len(np.unique(gt_mask_flat)) == 1 or len(np.unique(pred_mask_flat)) == 1:
             raise ValueError("输入数组不能是常数数组")
-        ret = {}
+
+        ret = {}  # 使用OrderedDict代替普通dict
         ret["pr_auc"] = ImageEstimate.metric_pr_auc(gt_mask_flat, pred_mask_flat)
-        ret["wmse"] = ImageEstimate.mse_with_weight(gt_mask_flat, pred_mask_flat)
-        ret["soft_iou"] = ImageEstimate.metric_soft_iou(gt_mask_flat, pred_mask_flat)
         ret["r_square"] = ImageEstimate.metric_r_square(gt_mask_flat, pred_mask_flat)
+        ret["soft_iou"] = ImageEstimate.metric_soft_iou(gt_mask_flat, pred_mask_flat)
         ret["ssim"] = ImageEstimate.metric_ssim(gt_mask_flat, pred_mask_flat)
+        ret["mse"] = ImageEstimate.mse_with_weight(gt_mask_flat, pred_mask_flat, weight=1)
         return ret
+
+    @staticmethod
+    def metric_colorspace(gt_mask: np.ndarray, pred_mask: np.ndarray, threshold=0):
+        # 确保输入是一维数组
+        # 将pred_mask阈值化
+        pred_mask_flat = np.where(pred_mask > threshold, 1, 0).flatten()
+        gt_mask_flat = np.where(gt_mask > threshold, 1, 0).flatten()
+
+        # IoU计算正确，因为jaccard_score在average=None时返回每个类的得分
+        real_iou, fake_iou = jaccard_score(pred_mask_flat, gt_mask_flat, average=None)
+
+        # 修复：单独计算每个类别的准确率
+        # 正类准确率：预测为1且实际为1的比例
+        positive_pred = pred_mask_flat == 1
+        positive_true = gt_mask_flat == 1
+        fake_acc = np.sum(np.logical_and(positive_pred, positive_true)) / np.sum(positive_true) if np.sum(positive_true) > 0 else 0
+
+        # 负类准确率：预测为0且实际为0的比例
+        negative_pred = pred_mask_flat == 0
+        negative_true = gt_mask_flat == 0
+        real_acc = np.sum(np.logical_and(negative_pred, negative_true)) / np.sum(negative_true) if np.sum(negative_true) > 0 else 0
+
+        ret = {}
+        ret["F1"] = float(ImageEstimate.metric_f1(gt_mask_flat, pred_mask_flat))
+        ret["real_iou"] = float(real_iou)
+        ret["fake_iou"] = float(fake_iou)
+        ret["real_acc"] = float(real_acc)
+        ret["fake_acc"] = float(fake_acc)
+
+        if ret["fake_iou"] <= 0.6:
+            return ret, False
+        return ret, True

@@ -10,7 +10,7 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 
 from skimage.metrics import structural_similarity as ssim
-
+from skimage import color
 import torch
 import lpips
 
@@ -87,7 +87,7 @@ class ImageSimilarity:
             if input_format == "RGB":
                 arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
             # 如果已经是BGR，不需要转换
-        elif color_space == "LAB" or color_space == "CIELAB":
+        elif color_space in ["LAB", "CIELAB"]:
             if input_format == "RGB":
                 arr = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
             else:  # BGR
@@ -128,76 +128,61 @@ class ImageSimilarity:
         heatmap: bool = False,
         gray: bool = False,
         align: bool = False,
+        threshold: float = 1.0,
+        *args,
+        **kwargs,
     ) -> Union[Image.Image, np.ndarray]:
-        src_array = ImageSimilarity.load_image_array(src_img, color_space)
-        target_array = ImageSimilarity.load_image_array(target_img, color_space)
-
+        color_space_upper = color_space.upper()
+        src_array = ImageSimilarity.load_image_array(src_img, color_space_upper)
+        target_array = ImageSimilarity.load_image_array(target_img, color_space_upper)
         if src_array.shape != target_array.shape:
             raise ValueError("源图像和目标图像的尺寸不匹配。")
 
         if align:
             src_array, target_array, _ = ImageSift.align_images(src_array, target_array)
 
-        color_space_upper = color_space.upper()
-
         if color_space_upper == "HSV":
-            # HSV 颜色空间处理
-            sa = src_array.astype(np.int16)
-            ta = target_array.astype(np.int16)
+            # 转为极坐标表示
+            h1, s1, v1 = cv2.split(src_array)
+            h2, s2, v2 = cv2.split(target_array)
 
-            # 确定H通道的最大值
             h_max = 179.0 if src_array.dtype == np.uint8 else 360.0
+            h_rad1 = h1 * (2 * np.pi / h_max)
+            h_rad2 = h2 * (2 * np.pi / h_max)
 
-            # Hue 通道差值，考虑环绕性
-            h_diff = np.abs(sa[:, :, 0] - ta[:, :, 0])
-            h_diff_wrapped = np.minimum(h_diff, h_max - h_diff)
-            h_norm = h_diff_wrapped * (255.0 / (h_max / 2.0))  # 缩放到0-255范围
+            # 转为笛卡尔坐标计算差异
+            x1 = s1 * np.cos(h_rad1)
+            y1 = s1 * np.sin(h_rad1)
+            x2 = s2 * np.cos(h_rad2)
+            y2 = s2 * np.sin(h_rad2)
 
-            # S、V 通道差值并归一化
-            s_diff = np.abs(sa[:, :, 1] - ta[:, :, 1])
-            v_diff = np.abs(sa[:, :, 2] - ta[:, :, 2])
-
-            # 综合H、S、V三通道差异，可以考虑加权
-            diff_gray = h_norm + s_diff + v_diff
-            # diff_gray = (h_norm * 0.5 + s_diff * 0.3 + v_diff * 0.2)
+            # 计算色度平面的欧几里得距离和值差异
+            chroma_diff = np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+            value_diff = np.abs(v1 - v2)
+            diff_gray = (chroma_diff + value_diff) / 2
 
         elif color_space_upper in ["LAB", "CIELAB"]:
             src_lab = src_array.astype(np.float32)
             target_lab = target_array.astype(np.float32)
 
-            # 统一的LAB数据归一化策略
-            # 检查并转换L通道到0-100范围
-            if src_lab[:, :, 0].max() > 100:
-                src_lab[:, :, 0] = src_lab[:, :, 0] * 100.0 / 255.0
-            if target_lab[:, :, 0].max() > 100:
-                target_lab[:, :, 0] = target_lab[:, :, 0] * 100.0 / 255.0
-
-            # 检查并转换a,b通道到-128到+127范围
-            # 如果最小值>=0，说明可能是0-255范围
-            if src_lab[:, :, 1:].min() >= 0:
-                src_lab[:, :, 1:] = src_lab[:, :, 1:] - 128.0
-            if target_lab[:, :, 1:].min() >= 0:
-                target_lab[:, :, 1:] = target_lab[:, :, 1:] - 128.0
-
-            # 计算Delta E
-            delta_l = src_lab[:, :, 0] - target_lab[:, :, 0]
-            delta_a = src_lab[:, :, 1] - target_lab[:, :, 1]
-            delta_b = src_lab[:, :, 2] - target_lab[:, :, 2]
-            delta_e = np.sqrt(delta_l**2 + delta_a**2 + delta_b**2)
-
-            max_delta_e = 10
-            diff_gray = np.clip(delta_e / max_delta_e, 0, 1)
+            if kwargs.get("cie_version") == "CIEDE2000":
+                # 使用 CIEDE2000 计算颜色差异
+                delta_e = color.deltaE_ciede2000(src_lab, target_lab)
+            elif kwargs.get("ciede_version") == "CIEDE94":
+                # 使用 CIEDE94 计算颜色差异
+                delta_e = color.deltaE_ciede94(src_lab, target_lab)
+            else:
+                delta_e = color.deltaE_cie76(src_lab, target_lab)
+            diff_gray = delta_e
 
         elif color_space_upper == "RGB":
             # RGB 颜色空间处理
             diff = cv2.absdiff(src_array, target_array).astype(np.float32)
             diff_gray = diff.mean(axis=2)
-
         elif color_space_upper == "YCBCR":
             # YCbCr 颜色空间处理
             diff = cv2.absdiff(src_array, target_array).astype(np.float32)
             diff_gray = diff.mean(axis=2)
-
         elif color_space_upper == "GRAY":
             # 灰度图像处理
             if src_array.ndim == 3:
@@ -206,7 +191,6 @@ class ImageSimilarity:
             if target_array.ndim == 3:
                 target_array = cv2.cvtColor(target_array, cv2.COLOR_RGB2GRAY)
             diff_gray = cv2.absdiff(src_array, target_array).astype(np.float32)
-
         else:
             raise ValueError(f"不支持的颜色空间: {color_space}")
 

@@ -5,6 +5,7 @@
     "bbox",
     "binarize",
     "brushedit",
+    "colorspace",
     "corrcoef",
     "errstate",
     "fragfake",

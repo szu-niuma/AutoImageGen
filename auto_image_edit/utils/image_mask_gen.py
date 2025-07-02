@@ -29,21 +29,36 @@ class ImageMaskGen:
         return lpips_diff * pixel_diff
 
     @staticmethod
-    def rule_multiplication(pixel_diff, lpips_diff):
-        return np.where((pixel_diff > 0) & (lpips_diff > 0), lpips_diff * pixel_diff * 255 * 255, lpips_diff + pixel_diff)
+    def rule_multiplication(pixel_diff: np.ndarray, lpips_diff: np.ndarray, alpha: float = 1.0) -> np.ndarray:
+        """
+        使用幂函数融合像素差异和LPIPS差异: f(P(x), L(x)) = (L(x) * P(x))^alpha
+
+        Args:
+            pixel_diff: 像素差异矩阵，范围[0,1]
+            lpips_diff: LPIPS差异矩阵，范围[0,1]
+            alpha: 指数参数，用于控制结果的强度，默认为1.0
+
+        Returns:
+            融合后的差异矩阵，范围[0,1]
+        """
+        # 创建掩码，标识 pixel_diff 为 0 的区域
+        zero_mask = pixel_diff == 0
+
+        # 计算乘积的幂
+        result = np.power(lpips_diff * pixel_diff, alpha)
+
+        # 将 pixel_diff 为 0 的区域设为 0
+        result[zero_mask] = 0
+
+        return result
 
     @staticmethod
-    def adapter(pixel_diff: np.ndarray, lpips_diff: np.ndarray, adapter) -> np.ndarray:
-        return adapter * lpips_diff + (1 - adapter) * pixel_diff
-
-    @staticmethod
-    def entropy_fusion(pixel_diff, lpips_diff, window_size=5):
+    def entropy_fusion(pixel_diff, lpips_diff, window_size=3):
         """
         基于局部熵的图像融合方法
 
         Args:
             diff_map: 差异图像 (H, W)，已归一化到[0,1]
-            ssim_map: SSIM图像 (H, W)，已归一化到[0,1]
             lpips_map: LPIPS图像 (H, W)，已归一化到[0,1]
             window_size: 局部窗口大小，默认为5
 
@@ -51,60 +66,95 @@ class ImageMaskGen:
             fused_map: 融合后的图像 (H, W)，范围[0,1]
         """
 
-        @lru_cache(maxsize=8)
+        # 快速输入验证
+        if not (
+            isinstance(pixel_diff, np.ndarray) and isinstance(lpips_diff, np.ndarray) and pixel_diff.ndim == 2 and lpips_diff.ndim == 2
+        ):
+            raise ValueError("所有输入必须是2D numpy数组")
+
+        if pixel_diff.shape != lpips_diff.shape:
+            raise ValueError("输入图像必须具有相同的尺寸")
+
+        # 确保window_size是奇数
+        window_size = max(3, window_size + (1 - window_size % 2))
+
+        @lru_cache(maxsize=16)
         def _get_structure_element(radius):
             """缓存结构元素以避免重复创建"""
             return disk(radius)
 
-        def local_entropy(image, window_size=5):
-            """
-            计算局部熵，针对已归一化输入进行优化
-            """
-            # 确保window_size是奇数且合理
-            window_size = max(3, window_size if window_size % 2 == 1 else window_size + 1)
-            radius = window_size // 2
-
-            # 由于输入已归一化到[0,1]，直接转换为uint8
-            image_uint8 = (image * 255).astype(np.uint8)
+        def fast_local_entropy(image):
+            """优化的局部熵计算"""
+            # 直接转换为uint8
+            image_uint8 = np.clip(image * 255, 0, 255).astype(np.uint8)
 
             # 使用缓存的结构元素
-            selem = _get_structure_element(radius)
+            selem = _get_structure_element(window_size // 2)
 
-            # 计算局部熵
+            # 使用skimage的熵计算函数
             entropy_map = filters.rank.entropy(image_uint8, selem)
 
-            # 优化的归一化：直接除以理论最大值
-            max_entropy = np.log2(256)  # 8位图像的最大熵
-            return (entropy_map.astype(np.float32) / max_entropy).clip(0, 1)
+            # 理论最大熵值归一化
+            max_entropy = np.log2(256)
+            return entropy_map.astype(np.float32) / max_entropy
 
-        # 快速输入验证
-        maps = [pixel_diff, lpips_diff]
-        if not all(isinstance(img, np.ndarray) and img.ndim == 2 for img in maps):
-            raise ValueError("所有输入必须是2D numpy数组")
+        # 计算两个差异图的熵
+        entropy_pixel = fast_local_entropy(pixel_diff)
+        entropy_lpips = fast_local_entropy(lpips_diff)
 
-        shape = pixel_diff.shape
-        if not all(img.shape == shape for img in maps[1:]):
-            raise ValueError("所有输入图像必须具有相同的尺寸")
+        # 计算总熵和权重
+        total_entropy = entropy_pixel + entropy_lpips + 1e-10  # 避免除零
+        weight = entropy_pixel / total_entropy
 
-        # 批量计算局部熵
-        try:
-            entropies = [local_entropy(img, window_size) for img in maps]
-        except Exception as e:
-            raise RuntimeError(f"计算局部熵时出错: {e}")
+        fused_map = weight * pixel_diff + (1 - weight) * lpips_diff
+        # 断言 fused_map 的值在 [0, 1] 范围内
+        if not np.all((0 <= fused_map) & (fused_map <= 1)):
+            raise ValueError("融合后的图像值必须在 [0, 1] 范围内")
+        return fused_map
 
-        # 向量化权重计算
-        entropy_stack = np.stack(entropies, axis=0)  # (3, H, W)
-        total_entropy = np.sum(entropy_stack, axis=0) + 1e-10  # 避免除零
+    @staticmethod
+    def adapter(pixel_diff: np.ndarray, lpips_diff: np.ndarray, adapter) -> np.ndarray:
+        # 创建掩码，标识 pixel_diff 为 0 的区域
+        zero_mask = pixel_diff == 0
+        # 在 pixel_diff 不为 0 的区域应用权重
+        result = adapter * pixel_diff + (1 - adapter) * lpips_diff
+        # 将 pixel_diff 为 0 的区域设为 0
+        result[zero_mask] = 0
+        return result
 
-        # 计算权重
-        weights = entropy_stack / total_entropy[None, ...]  # 广播除法
+    @staticmethod
+    def l2_weight(pixel_diff, lpips_diff, weight):
+        """
+        使用加权 L2 范数结合两个已归一化的差异 Mask。
+        Args:
+            mask_pixel_diff_norm (np.ndarray): 归一化后的像素差 Mask (值在 [0, 1] 之间)。
+            mask_lpips_norm (np.ndarray): 归一化后的人眼感知 LPIPS Mask (值在 [0, 1] 之间)。
+            w_pixel_diff (float): 像素差 Mask 的权重。
+            w_lpips (float): LPIPS Mask 的权重。
+        Returns:
+            np.ndarray: 结合后的差异 Mask，值也在 [0, 1] 之间。
+        Raises:
+            ValueError: 如果输入 Mask 的形状不一致。
+            ValueError: 如果权重之和不接近 1.0 (可选检查)。
+        """
+        # 确保输入 Mask 形状一致
+        if pixel_diff.shape != lpips_diff.shape:
+            raise ValueError("输入 Mask 的形状必须一致。")
 
-        # 向量化融合
-        map_stack = np.stack(maps, axis=0)  # (3, H, W)
-        fused_map = np.sum(weights * map_stack, axis=0)
+        # 创建掩码，标识 pixel_diff 为 0 的区域
+        zero_mask = pixel_diff == 0
 
-        # 由于输入已归一化，输出应该也在[0,1]范围内，但仍进行裁剪确保安全
-        return np.clip(fused_map, 0, 1).astype(np.float32)
+        # 计算加权平方和
+        weighted_sum_of_squares = weight * (pixel_diff**2) + (1 - weight) * (lpips_diff**2)
+        # 开平方根，得到最终的组合 Mask
+        combined_mask = np.sqrt(weighted_sum_of_squares)
+
+        # 将 pixel_diff 为 0 的区域设为 0
+        combined_mask[zero_mask] = 0
+
+        # 确保结果在 [0, 1] 范围内
+        assert np.all((0 <= combined_mask) & (combined_mask <= 1)), "组合后的 Mask 值必须在 [0, 1] 范围内"
+        return combined_mask
 
     @staticmethod
     def linear_weight(pixel_diff: np.ndarray, lpips_diff: np.ndarray, weight: float = 0.5) -> np.ndarray:
@@ -113,4 +163,40 @@ class ImageMaskGen:
         """
         if not (0 <= weight <= 1):
             raise ValueError("权重必须在0到1之间")
-        return weight * pixel_diff + (1 - weight) * lpips_diff
+
+        # 创建掩码，标识 pixel_diff 为 0 的区域
+        zero_mask = pixel_diff == 0
+
+        # 进行线性加权融合
+        result = weight * pixel_diff + (1 - weight) * lpips_diff
+
+        # 将 pixel_diff 为 0 的区域设为 0
+        result[zero_mask] = 0
+
+        return result
+
+    @staticmethod
+    def sigmoid_weight(pixel_diff: np.ndarray, lpips_diff: np.ndarray, k: float = 10, d0: float = 0.5) -> np.ndarray:
+        """
+        使用sigmoid函数动态调整像素差异和LPIPS差异的权重
+
+        Args:
+            pixel_diff: 像素差异矩阵，范围[0,1]
+            lpips_diff: LPIPS差异矩阵，范围[0,1]
+            k: sigmoid曲线的陡峭程度，值越大曲线越陡
+            d0: 阈值点，当pixel_diff=d0时，权重alpha=0.5
+
+        Returns:
+            融合后的差异矩阵
+        """
+        # 创建掩码，标识 pixel_diff 为 0 的区域
+        zero_mask = pixel_diff == 0
+
+        # 计算动态权重和融合结果
+        alpha = 1 / (1 + np.exp(-k * (pixel_diff - d0)))
+        result = alpha * pixel_diff + (1 - alpha) * lpips_diff
+
+        # 将 pixel_diff 为 0 的区域设为 0
+        result[zero_mask] = 0
+
+        return result

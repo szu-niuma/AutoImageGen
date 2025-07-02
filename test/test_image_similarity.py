@@ -12,6 +12,7 @@ from auto_image_edit.utils.image_similarity import ImageSimilarity
 from auto_image_edit.utils.image_estimate import ImageEstimate
 from eval.mask_eval import post_process_mask
 from auto_image_edit.utils.image_sift import ImageSift
+from auto_image_edit.utils.image_mask_gen import ImageMaskGen
 
 
 # 新增：通用函数
@@ -39,55 +40,62 @@ def generate_np(src, dst, compare_func, **kwargs):
     return compare_func(src, dst, **kwargs)
 
 
+def pre_process_mask(real_img, fake_img, target_size=(256, 256)):
+    """
+    target_size: 目标尺寸(64,64) - (1024,1024)
+    """
+    real_img = Image.open(real_img).convert("RGB")
+    original_size = (real_img.width, real_img.height)  # 保存原始尺寸
+    real_img = real_img.resize(target_size, Image.LANCZOS)
+    real_img = real_img.resize(original_size, Image.LANCZOS)  # 恢复到原始尺寸
+
+    fake_img = Image.open(fake_img).convert("RGB")
+    fake_img = fake_img.resize(target_size, Image.LANCZOS)
+    fake_img = fake_img.resize(original_size, Image.LANCZOS)  # 恢复到原始尺寸
+    return real_img, fake_img
+
+
 # 原有代码块改为调用函数
 if __name__ == "__main__":
-    src = "/home/yuyangxin/data/dataset/CocoGlide/Au/clock_267351.png"
-    dst = "/home/yuyangxin/data/dataset/CocoGlide/Tp/glide_inpainting_val2017_267351_up.png"
+    real_img = "/data0/yuyangxin/dataset/FragFake/Image/original/original_broccoli_000000427521.jpg"
+    fake_img = "/data0/yuyangxin/dataset/FragFake/Image/UltraEdit/hard/addition/broccoli_000000427521_addition.jpg"
     # dst = "/home/yuyangxin/data/dataset/CocoGlide/glide_inpainting_val2017_267351_up_quality_90.jpg"
     # src = "/home/yuyangxin/data/dataset/custom_dataset/llm_edit/Au/real_069.jpg"
     # dst = "/home/yuyangxin/data/dataset/custom_dataset/llm_edit/Tp/fake_069.jpg"
+    real_img, fake_img = pre_process_mask(real_img, fake_img, target_size=(256, 256))
+    real_img.save("./real_img.png")
+    fake_img.save("./fake_img.png")
+    # 将real_img和fake_img转换为PIL Image对象
+    lpips_diff = ImageSimilarity.compare_images_lpips(real_img, fake_img, heatmap=False, norm="zscore", gray=False, align=True)
+    pixel_diff = ImageSimilarity.compare_images_pixelwise(
+        real_img, fake_img, heatmap=False, norm="zscore", gray=False, color_space="LAB", align=True
+    )
 
-    lpips_diff = ImageSimilarity.compare_images_lpips(src, dst, heatmap=False, norm="zscore", gray=False, align=True)
-    pixel_diff = ImageSimilarity.compare_images_pixelwise(src, dst, heatmap=False, norm="zscore", gray=False, color_space="LAB", align=True)
+    # 自适应融合
+    sigmoid_weight = ImageMaskGen.sigmoid_weight(pixel_diff, lpips_diff)
+    sigmoid_weight_gray = ImageSimilarity.to_gray(sigmoid_weight)
+    sigmoid_weight_gray.save("./sigmoid_weight_gray.png")
+    sigmoid_weight_heatmap = ImageSimilarity.to_heatmap(sigmoid_weight)
+    sigmoid_weight_heatmap.save("./sigmoid_weight_heatmap.png")
 
-    # ssim_diff = ImageSimilarity.compare_images_ssim(src, dst, heatmap=False, norm="zscore", gray=False)
-    # rule_multi_diff = np.where((pixel_diff > 0) & (lpips_diff > 0), lpips_diff * pixel_diff * 255 * 255, lpips_diff + pixel_diff)
-    # res = ImageSimilarity.norm_method(rule_multi_diff, norm_method="zscore")
+    # 算子组合
+    canny_diff = ImageSimilarity.get_canny(real_img)
+    canny_adapter = ImageMaskGen.adapter(pixel_diff, lpips_diff, canny_diff)
+    canny_adapter_gray = ImageSimilarity.to_gray(canny_adapter)
+    canny_adapter_gray.save("./canny_adapter_gray.png")
+    canny_adapter_heatmap = ImageSimilarity.to_heatmap(canny_adapter)
+    canny_adapter_heatmap.save("./canny_adapter_heatmap.png")
 
-    # res = entropy_fusion(pixel_diff, lpips_diff)
+    # 线性组合
+    linear_weight = ImageMaskGen.linear_weight(pixel_diff, lpips_diff, weight=0.5)  # 处理掩码
+    linear_weight_gray = ImageSimilarity.to_gray(linear_weight)
+    linear_weight_gray.save("./linear_weight_gray.png")
+    linear_weight_heatmap = ImageSimilarity.to_heatmap(linear_weight)
+    linear_weight_heatmap.save("./linear_weight_heatmap.png")
 
-    # # 相加取均值
-    # res = np.where(pixel_diff > 0, lpips_diff, pixel_diff)
-    # res = np.where(pixel_diff > 0, lpips_diff, pixel_diff)
-    res = (pixel_diff + lpips_diff) / 2
-    ImageSimilarity.to_heatmap(res).save("./output/lab_heatmap.png")
-    # ImageSimilarity.to_gray(res).save("./output/lab_pixel.png")
-
-    # # # 相加条件：当任一差异指标为0时，采用相加操作保留非零指标的贡献
-    # # # 意义：避免因某一指标失效（如颜色未变但结构篡改）导致整体差异被抑制
-    # # # 相乘条件：当两个指标均非零时，采用相乘放大协同差异
-    # # # 意义：强调同时被像素级和语义级方法检测到的区域（高置信差异）
-    # # # 创建掩码：判断哪些位置的值为0（或接近0）
-    # # threshold = 1e-6  # 防止浮点数精度问题
-    # # lpips_zero_mask = np.abs(lpips) < threshold
-    # # pixel_zero_mask = np.abs(pixel) < threshold
-
-    # # # 当任一指标为0时使用相加，否则使用相乘
-    # # res = np.where(lpips_zero_mask | pixel_zero_mask, lpips + pixel, lpips * pixel)  # 相加保留非零指标  # 相乘放大协同差异
-
-    # # # 归一化到0-1
-    # # res = ImageSimilarity.norm_method(res, norm_method="minmax")
-
-    # # 获取平滑银子
-    # sobel_factor = ImageSimilarity.get_canny(dst, norm_method="zscore")
-
-    # # 获取res
-    # res = (1 - sobel_factor) * lpips + sobel_factor * pixel
-    # # res = sobel_factor * lpips + (1 - sobel_factor) * pixel
-
-    # # 保存为热力图
-    # res_img = ImageSimilarity.to_heatmap(res)
-    # res_img.save("./output/lpips_pixelwise_canny_heat.png")
-
-    # res_img = ImageSimilarity.to_grey(res)
-    # res_img.save("./output/lpips_pixelwise_canny_grey.png")
+    # 乘积平方
+    square_multiplication = ImageMaskGen.rule_multiplication(pixel_diff, lpips_diff, alpha=0.5)
+    square_multiplication_gray = ImageSimilarity.to_gray(square_multiplication)
+    square_multiplication_gray.save("./square_multiplication_gray.png")
+    square_multiplication_heatmap = ImageSimilarity.to_heatmap(square_multiplication)
+    square_multiplication_heatmap.save("./square_multiplication_heatmap.png")
