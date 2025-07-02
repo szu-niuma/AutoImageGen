@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
-
+import random
 from loguru import logger
 from tqdm import tqdm
 from ..utils.image_processor import ImageProcessor
@@ -106,6 +106,8 @@ class BasePipeline(ABC):
 
         # 应用max_num限制
         if self.max_num != float("inf"):
+            # 要求随机打乱
+            random.shuffle(valid_files)
             valid_files = valid_files[: int(self.max_num)]
 
         return valid_files
@@ -135,6 +137,9 @@ class BasePipeline(ABC):
         """
         # 根据image_path生成保存路径
         image_path = info.get("image_path")
+        if image_path is None:
+            image_path = info.get("img_path")  # 兼容旧格式
+
         if image_path:
             image_path = Path(image_path)
             save_path = self.output_dir / f"{image_path.stem}.json"
@@ -208,12 +213,8 @@ class BasePipeline(ABC):
         if workers == 1:
             # 单线程处理
             for info in tqdm(valid_files, desc="处理中", disable=len(valid_files) == 1):
-                try:
-                    self._execute_pipeline(info)
-                    success_count += 1
-                except Exception as e:
-                    error_count += 1
-                    logger.error(f"处理文件失败 {info}: {str(e)}", exc_info=True)
+                self._execute_pipeline(info)
+                success_count += 1
         else:
             # 多线程处理
             with ThreadPoolExecutor(max_workers=workers) as executor:

@@ -21,7 +21,10 @@ class CreativityPipeline(BasePipeline):
         """
         核心处理逻辑：图像创意生成
         """
-        image_path = Path(info["image_path"])
+        if image_path := info.get("image_path") is None:
+            # 如果没有image_path，尝试使用img_path兼容旧格式
+            image_path = info.get("img_path")
+        image_path = Path(image_path)
 
         # 加载和处理图像
         src_img, _, _ = self.image_processor.load_image(image_path)

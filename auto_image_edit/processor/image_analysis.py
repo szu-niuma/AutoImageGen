@@ -16,7 +16,7 @@ class ImageAnalysis(BaseImageProcessor):
         self.store = store if store is not None else {}
         self.image_analyst = ImageAnalystPrompt(self.llm, store=self.store)
 
-    def process_file(self, image_path: Path, image_base64: None) -> Any:
+    def process_file(self, image_path: Path, image_base64: None, *args, **kwargs) -> Any:
         """执行图像分析"""
         human_prompt = self.load_human_msg(image_path, self.USER_PROMPT, image_base64=image_base64)
         analysis_result = self.image_analyst.run(human_prompt, image_path.name).model_dump()
