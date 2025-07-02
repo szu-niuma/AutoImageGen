@@ -10,7 +10,7 @@ from .base_processor import BaseImageProcessor
 
 class ImageComparison(BaseImageProcessor):
     USER_PROMPT = "Please analyze the forensic differences in the following images."
-    PROCESS_NAME = "图像对比处理器"
+    PROCESS_NAME = "Image Comparison Processor"
 
     def __init__(self, config: dict, store=None):
         super().__init__(config, self.PROCESS_NAME)

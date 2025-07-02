@@ -10,11 +10,18 @@ class CreativityPipeline(BasePipeline):
     重构后的CreativityPipeline，基于BasePipeline
     """
 
-    def __init__(self, config: dict, out_dir="output", is_debug: bool = False, max_num: int = None):
+    def __init__(
+        self,
+        config: dict,
+        out_dir="output",
+        is_debug: bool = False,
+        max_num: int = None,
+        image_type: str = "natural",
+    ):
         super().__init__(config=config, out_dir=out_dir, is_debug=is_debug, max_num=max_num, pipeline_name="CreativityPipeline")
         # 初始化各种处理器
         self.authority_assessor = AuthorityAssess(config)
-        self.image_analyst = ImageAnalysis(config)
+        self.image_analyst = ImageAnalysis(config, image_type=image_type)
         self.image_consultant = ImageConsultant(config)
 
     def pipeline(self, info: Dict[str, Any]) -> Dict[str, Any]:

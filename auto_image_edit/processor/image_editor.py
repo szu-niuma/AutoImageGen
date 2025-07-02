@@ -11,7 +11,7 @@ from .base_processor import BaseImageProcessor
 
 
 class ImageEditor(BaseImageProcessor):
-    USER_PROMPT = "目标物体: {object}，编辑要求:{edit_process}"
+    USER_PROMPT = "Target object: {object}, Edit requirements: {edit_process}"
 
     def __init__(self, config: dict, out_dir, store=None):
         super().__init__(config, out_dir, "image_edit")
@@ -38,7 +38,14 @@ class ImageEditor(BaseImageProcessor):
             raise ValueError(f"无法解析图片链接：{markdown}")
         return m.group(1)
 
-    def process_file(self, img_path: Path, image_base64: str, image_creativity: list, **kwargs) -> Optional[str]:
+    def process_file(
+        self,
+        img_path: Path,
+        image_base64: str,
+        image_creativity: list,
+        *args,
+        **kwargs,
+    ) -> Optional[str]:
         """单文件处理逻辑，供多线程调用"""
         img_path = Path(img_path)
         for edit_info in image_creativity:

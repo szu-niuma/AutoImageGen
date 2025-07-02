@@ -11,8 +11,8 @@ from .base_processor import BaseImageProcessor
 
 class ForensicReasoning(BaseImageProcessor):
     # 支持的图片后缀
-    USER_PROMPT = "请分析这张图片的伪造痕迹"
-    PROCESS_NAME = "伪造内容分析器"
+    USER_PROMPT = "Please analyze the forgery traces in this image"
+    PROCESS_NAME = "Forgery Content Analyzer"
 
     def __init__(self, config: dict, store=None):
         super().__init__(config, self.PROCESS_NAME)
