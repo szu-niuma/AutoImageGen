@@ -13,6 +13,10 @@ from .utils.util import load_json, save_json
 
 
 class DiffPipeline:
+    """
+    获取图像差异信息的管道
+    """
+
     DEFAULT_WORKERS = 16
 
     def __init__(self, config: dict, out_dir="output", is_debug: bool = False, max_num: int = None):

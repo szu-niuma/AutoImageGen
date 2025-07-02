@@ -7,7 +7,7 @@ from typing import Any
 from loguru import logger
 from tqdm import tqdm
 
-from .processor import AuthorityAssess, ImageAnalysis, ImageCreativity
+from .processor import AuthorityAssess, ImageAnalysis, ImageConsultant
 from .utils.image_processor import ImageProcessor
 from .utils.util import load_json, save_json
 
@@ -37,7 +37,7 @@ class CreativityPipeline:
         self.image_analyst = ImageAnalysis(config)
 
         # 创建图像创意生成器
-        self.image_consultant = ImageCreativity(config)
+        self.image_consultant = ImageConsultant(config)
 
         self.output_dir: Path = Path(out_dir) / "CreativityPipeline"
         self.output_dir.mkdir(parents=True, exist_ok=True)
