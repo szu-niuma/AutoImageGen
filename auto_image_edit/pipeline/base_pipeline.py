@@ -213,8 +213,10 @@ class BasePipeline(ABC):
         if workers == 1:
             # 单线程处理
             for info in tqdm(valid_files, desc="处理中", disable=len(valid_files) == 1):
-                self._execute_pipeline(info)
-                success_count += 1
+                res = self._execute_pipeline(info)
+                info.update(res)
+                if res:
+                    success_count += 1
         else:
             # 多线程处理
             with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -224,7 +226,8 @@ class BasePipeline(ABC):
                     for future in as_completed(future_to_file):
                         file_info = future_to_file[future]
                         try:
-                            future.result()
+                            res = future.result()
+                            file_info.update(res)
                             success_count += 1
                         except Exception as e:
                             error_count += 1
